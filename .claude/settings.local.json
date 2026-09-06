@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm init -y --silent)",
+      "PowerShell(npm install pg --no-save --silent 2>$null)"
+    ]
+  }
+}
