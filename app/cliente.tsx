@@ -12,7 +12,7 @@ import { alertar } from '@/src/utils/alerta';
 import { horaParaDate, dateParaHora } from '@/src/utils/tempo';
 import { formatarTelefone } from '@/src/utils/formato';
 
-const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'];
 
 type Clinica = { id: string; nome: string; cor: string; endereco: string | null };
 
