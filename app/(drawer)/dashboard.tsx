@@ -60,6 +60,18 @@ function mesAnterior(mes: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function mesSeguinte(mes: string) {
+  const [ano, m] = mes.split('-').map(Number);
+  const d = new Date(ano, m, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function nomeDoMes(mes: string) {
+  const [ano, m] = mes.split('-').map(Number);
+  const texto = new Date(ano, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
 function variacao(atual: number, anterior: number) {
   if (anterior === 0) return atual > 0 ? 100 : 0;
   return ((atual - anterior) / Math.abs(anterior)) * 100;
@@ -70,6 +82,7 @@ export default function DashboardScreen() {
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [estoque, setEstoque] = useState<ProdutoEstoque[]>([]);
+  const [mesSelecionado, setMesSelecionado] = useState(mesAtual());
 
   const carregar = useCallback(async () => {
     const { data: cli } = await supabase.from('clinicas').select('*').order('nome');
@@ -105,7 +118,7 @@ export default function DashboardScreen() {
   );
 
   const resumoMes = useMemo(() => {
-    const mes = mesAtual();
+    const mes = mesSelecionado;
     const mesPassado = mesAnterior(mes);
 
     const entradas = atendimentos.filter((a) => a.pago && a.data.startsWith(mes)).reduce((s, a) => s + (a.valor || 0), 0);
@@ -129,19 +142,19 @@ export default function DashboardScreen() {
       variacaoSaidas: variacao(saidas, saidasAnterior),
       variacaoSaldo: variacao(saldo, saldoAnterior),
     };
-  }, [atendimentos, despesas]);
+  }, [atendimentos, despesas, mesSelecionado]);
 
   const indicadoresMes = useMemo(() => {
-    const mes = mesAtual();
+    const mes = mesSelecionado;
     const doMes = atendimentos.filter((a) => a.data.startsWith(mes));
     const ticketMedio = doMes.length > 0 ? doMes.reduce((s, a) => s + (a.valor || 0), 0) / doMes.length : 0;
     const pagos = doMes.filter((a) => a.pago).length;
     const taxaPagamento = doMes.length > 0 ? (pagos / doMes.length) * 100 : 0;
     return { totalAtendimentos: doMes.length, ticketMedio, taxaPagamento };
-  }, [atendimentos]);
+  }, [atendimentos, mesSelecionado]);
 
   const despesasPorCategoria = useMemo(() => {
-    const mes = mesAtual();
+    const mes = mesSelecionado;
     const mapa = new Map<string, number>();
     despesas
       .filter((d) => d.data_compra.startsWith(mes))
@@ -150,7 +163,7 @@ export default function DashboardScreen() {
     return Array.from(mapa.entries())
       .map(([categoria, total]) => ({ categoria, total, proporcao: totalGeral > 0 ? total / totalGeral : 0 }))
       .sort((a, b) => b.total - a.total);
-  }, [despesas]);
+  }, [despesas, mesSelecionado]);
 
   const principaisInsumos = useMemo(() => {
     const mapa = new Map<string, { nome: string; qtdComprada: number; totalGasto: number }>();
@@ -228,7 +241,7 @@ export default function DashboardScreen() {
   }
 
   const financeiroPorClinica = useMemo(() => {
-    const mes = mesAtual();
+    const mes = mesSelecionado;
     return listaComParticular.map((clinica) => {
       const doMes = atendimentos.filter((a) => pertenceAClinica(a, clinica) && a.data.startsWith(mes));
       const faturado = doMes.reduce((soma, a) => soma + (a.valor || 0), 0);
@@ -243,7 +256,7 @@ export default function DashboardScreen() {
       const liquido = (recebido - taxaMaquininha) * (percentual / 100);
       return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha };
     });
-  }, [listaComParticular, atendimentos]);
+  }, [listaComParticular, atendimentos, mesSelecionado]);
 
   const servicosPorClinica = useMemo(() => {
     return listaComParticular.map((clinica) => {
@@ -264,7 +277,8 @@ export default function DashboardScreen() {
     });
   }, [listaComParticular, atendimentos]);
 
-  const nomeMesAtual = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const nomeMesAtual = nomeDoMes(mesSelecionado);
+  const podeAvancarMes = mesSelecionado < mesAtual();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -273,8 +287,22 @@ export default function DashboardScreen() {
         <Text style={styles.headerTitulo}>Dashboard</Text>
       </View>
 
+      <View style={styles.seletorMesContainer}>
+        <TouchableOpacity onPress={() => setMesSelecionado((m) => mesAnterior(m))} hitSlop={10}>
+          <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.seletorMesTexto}>{nomeMesAtual}</Text>
+        <TouchableOpacity
+          onPress={() => podeAvancarMes && setMesSelecionado((m) => mesSeguinte(m))}
+          disabled={!podeAvancarMes}
+          hitSlop={10}
+        >
+          <Ionicons name="chevron-forward" size={20} color={podeAvancarMes ? theme.colors.text : theme.colors.textTertiary} />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <Text style={styles.secaoTitulo}>Resumo · {nomeMesAtual}</Text>
+        <Text style={styles.secaoTitulo}>Resumo</Text>
         <View style={styles.resumoContainer}>
           <View style={styles.resumoCard}>
             <View style={styles.resumoCabecalho}>
@@ -314,7 +342,7 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        <Text style={styles.secaoTitulo}>Financeiro por clínica · {nomeMesAtual}</Text>
+        <Text style={styles.secaoTitulo}>Financeiro por clínica</Text>
         {financeiroPorClinica.length === 0 ? (
           <View style={styles.vazioContainer}>
             <Ionicons name="business-outline" size={32} color={theme.colors.textTertiary} />
@@ -371,7 +399,7 @@ export default function DashboardScreen() {
           </View>
         ))}
 
-        <Text style={styles.secaoTitulo}>Saídas por categoria · {nomeMesAtual}</Text>
+        <Text style={styles.secaoTitulo}>Saídas por categoria</Text>
         {despesasPorCategoria.length === 0 ? (
           <View style={styles.vazioContainer}>
             <Ionicons name="pricetags-outline" size={32} color={theme.colors.textTertiary} />
@@ -518,6 +546,21 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  seletorMesContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginHorizontal: theme.spacing.md,
+    marginTop: theme.spacing.xs,
+  },
+  seletorMesTexto: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontFamily: theme.font.medium,
+    minWidth: 160,
+    textAlign: 'center',
+  },
   secaoTitulo: {
     color: theme.colors.text,
     fontSize: 16,
