@@ -6,9 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { CampoDataHora } from '@/components/campo-data-hora';
+import { SeletorDataInline } from '@/components/seletor-data-inline';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR, FORMAS_PAGAMENTO } from '@/src/theme';
-import { isoParaDate, dateParaIso, formatarDataBR, horaParaDate, dateParaHora, hoje, somarDias, somarMeses } from '@/src/utils/tempo';
+import {
+  isoParaDate, dateParaIso, formatarDataBR, horaParaDate, dateParaHora, hoje,
+  gerarOcorrenciasRecorrencia, type UnidadeRecorrencia, type FimRecorrencia,
+} from '@/src/utils/tempo';
 import { alertar } from '@/src/utils/alerta';
 import { formatarNumeroWhatsApp } from '@/src/utils/formato';
 
@@ -27,11 +31,26 @@ type PacienteSugestao = {
 
 const STATUS_OPCOES = ['agendado', 'realizado', 'cancelado'] as const;
 const PROCEDIMENTOS_OPCOES = ['Acupuntura', 'Fisioterapia', 'Reabilitação', 'Outro'] as const;
-const REPETICAO_OPCOES = [
-  { chave: 'semanal', rotulo: 'Semanal' },
-  { chave: 'quinzenal', rotulo: 'A cada 2 semanas' },
-  { chave: 'mensal', rotulo: 'Mensal (mesmo dia)' },
-] as const;
+const FREQUENCIA_OPCOES: { chave: UnidadeRecorrencia; rotulo: string; unidadeSingular: string; unidadePlural: string }[] = [
+  { chave: 'dia', rotulo: 'Diariamente', unidadeSingular: 'dia', unidadePlural: 'dias' },
+  { chave: 'semana', rotulo: 'Semanalmente', unidadeSingular: 'semana', unidadePlural: 'semanas' },
+  { chave: 'mes', rotulo: 'Mensalmente', unidadeSingular: 'mês', unidadePlural: 'meses' },
+  { chave: 'ano', rotulo: 'Anualmente', unidadeSingular: 'ano', unidadePlural: 'anos' },
+];
+const DIAS_SEMANA_RECORRENCIA = [
+  { valor: 0, letra: 'D' },
+  { valor: 1, letra: 'S' },
+  { valor: 2, letra: 'T' },
+  { valor: 3, letra: 'Q' },
+  { valor: 4, letra: 'Q' },
+  { valor: 5, letra: 'S' },
+  { valor: 6, letra: 'S' },
+];
+const FIM_RECORRENCIA_OPCOES: { chave: FimRecorrencia; rotulo: string }[] = [
+  { chave: 'apos', rotulo: 'Após' },
+  { chave: 'data', rotulo: 'Em uma data' },
+  { chave: 'nunca', rotulo: 'Sem data de término' },
+];
 const REGEX_HORA = /^([0-1]?\d|2[0-3]):([0-5]\d)$/;
 const DURACAO_PADRAO_MIN = 60;
 
@@ -78,8 +97,12 @@ export default function ModalAtendimento() {
   const [horaFim, setHoraFim] = useState('');
   const duracaoRef = useRef(DURACAO_PADRAO_MIN);
   const [repetir, setRepetir] = useState(false);
-  const [padraoRepeticao, setPadraoRepeticao] = useState<(typeof REPETICAO_OPCOES)[number]['chave']>('semanal');
-  const [qtdRepeticoes, setQtdRepeticoes] = useState('4');
+  const [frequenciaRecorrencia, setFrequenciaRecorrencia] = useState<UnidadeRecorrencia>('semana');
+  const [intervaloRecorrencia, setIntervaloRecorrencia] = useState('1');
+  const [diasSemanaRecorrencia, setDiasSemanaRecorrencia] = useState<Set<number>>(new Set());
+  const [fimRecorrencia, setFimRecorrencia] = useState<FimRecorrencia>('apos');
+  const [qtdOcorrencias, setQtdOcorrencias] = useState('4');
+  const [dataFimRecorrencia, setDataFimRecorrencia] = useState('');
   const [procedimento, setProcedimento] = useState('');
   const [procedimentoChip, setProcedimentoChip] = useState<string>('');
   const [procedimentoOutro, setProcedimentoOutro] = useState('');
@@ -253,6 +276,26 @@ export default function ModalAtendimento() {
     setHoraFim(novoHoraFim);
   }
 
+  function alternarRepetir() {
+    const novoValor = !repetir;
+    setRepetir(novoValor);
+    if (novoValor && diasSemanaRecorrencia.size === 0) {
+      setDiasSemanaRecorrencia(new Set([isoParaDate(data).getDay()]));
+    }
+  }
+
+  function alternarDiaSemanaRecorrencia(dia: number) {
+    setDiasSemanaRecorrencia((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(dia)) {
+        if (novo.size > 1) novo.delete(dia);
+      } else {
+        novo.add(dia);
+      }
+      return novo;
+    });
+  }
+
   async function salvar() {
     if (!nomePaciente.trim() || (!clinicaId && !modoParticular) || !hora.trim() || !horaFim.trim()) {
       alertar('Preencha ao menos: paciente, clínica (ou particular), horário de início e de término.');
@@ -348,15 +391,22 @@ export default function ModalAtendimento() {
       }
 
       if (repetir) {
-        const quantidade = Math.max(1, Math.min(52, parseInt(qtdRepeticoes, 10) || 1));
+        const intervalo = Math.max(1, parseInt(intervaloRecorrencia, 10) || 1);
+        const quantidadeOcorrencias = Math.max(1, parseInt(qtdOcorrencias, 10) || 1);
+        const todasDatas = gerarOcorrenciasRecorrencia({
+          dataBase: data,
+          unidade: frequenciaRecorrencia,
+          intervalo,
+          diasSemana: frequenciaRecorrencia === 'semana' ? Array.from(diasSemanaRecorrencia) : undefined,
+          fim: fimRecorrencia,
+          quantidadeOcorrencias,
+          dataFim: fimRecorrencia === 'data' ? dataFimRecorrencia : undefined,
+        });
+        const datasAdicionais = todasDatas.filter((d) => d !== data);
+        const datasFinal = fimRecorrencia === 'apos' ? datasAdicionais.slice(0, quantidadeOcorrencias - 1) : datasAdicionais;
+
         let sessoesAdicionais = 0;
-        for (let i = 1; i < quantidade; i++) {
-          const proximaData =
-            padraoRepeticao === 'semanal'
-              ? somarDias(data, 7 * i)
-              : padraoRepeticao === 'quinzenal'
-                ? somarDias(data, 14 * i)
-                : somarMeses(data, i);
+        for (const proximaData of datasFinal) {
           const { error: erroRepeticao } = await supabase.from('atendimentos').insert({
             ...dadosAtendimento,
             data: proximaData,
@@ -538,13 +588,7 @@ export default function ModalAtendimento() {
           )}
 
           <Text style={styles.label}>Data</Text>
-          <CampoDataHora
-            valor={isoParaDate(data)}
-            modo="date"
-            aoAlterar={(d) => setData(dateParaIso(d))}
-            textoExibido={formatarDataBR(data)}
-            icone="calendar-outline"
-          />
+          <SeletorDataInline valor={data} aoAlterar={setData} textoExibido={formatarDataBR(data)} />
 
           <View style={styles.linha}>
             <View style={{ flex: 1 }}>
@@ -577,39 +621,122 @@ export default function ModalAtendimento() {
 
           {!atendimentoId && (
             <>
-              <TouchableOpacity style={styles.linhaPago} onPress={() => setRepetir(!repetir)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.linhaPago} onPress={alternarRepetir} activeOpacity={0.7}>
                 <View style={[styles.checkbox, repetir && styles.checkboxAtivo]}>
                   {repetir && <Text style={styles.checkboxMarca}>✓</Text>}
                 </View>
                 <Text style={styles.label2}>Repetir agendamento</Text>
               </TouchableOpacity>
 
-              {repetir && (
-                <View style={{ marginTop: 10 }}>
-                  <View style={styles.chipsContainer}>
-                    {REPETICAO_OPCOES.map((r) => (
-                      <TouchableOpacity
-                        key={r.chave}
-                        style={[styles.statusChip, padraoRepeticao === r.chave && styles.statusChipAtivo]}
-                        onPress={() => setPadraoRepeticao(r.chave)}
-                      >
-                        <Text style={[styles.statusChipTexto, padraoRepeticao === r.chave && styles.chipTextoAtivo]}>
-                          {r.rotulo}
+              {repetir && (() => {
+                const frequenciaAtual = FREQUENCIA_OPCOES.find((f) => f.chave === frequenciaRecorrencia)!;
+                const intervaloNumero = Math.max(1, parseInt(intervaloRecorrencia, 10) || 1);
+                const unidadeRotulo = intervaloNumero === 1 ? frequenciaAtual.unidadeSingular : frequenciaAtual.unidadePlural;
+                return (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={styles.label}>Frequência</Text>
+                    <View style={styles.chipsContainer}>
+                      {FREQUENCIA_OPCOES.map((f) => (
+                        <TouchableOpacity
+                          key={f.chave}
+                          style={[styles.statusChip, frequenciaRecorrencia === f.chave && styles.statusChipAtivo]}
+                          onPress={() => setFrequenciaRecorrencia(f.chave)}
+                        >
+                          <Text style={[styles.statusChipTexto, frequenciaRecorrencia === f.chave && styles.chipTextoAtivo]}>
+                            {f.rotulo}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {frequenciaRecorrencia === 'semana' && (
+                      <>
+                        <Text style={[styles.label, { marginTop: 12 }]}>Repetir em</Text>
+                        <View style={styles.chipsContainer}>
+                          {DIAS_SEMANA_RECORRENCIA.map((d) => {
+                            const ativo = diasSemanaRecorrencia.has(d.valor);
+                            return (
+                              <TouchableOpacity
+                                key={d.valor}
+                                style={[styles.diaSemanaCirculo, ativo && styles.diaSemanaCirculoAtivo]}
+                                onPress={() => alternarDiaSemanaRecorrencia(d.valor)}
+                              >
+                                <Text style={[styles.diaSemanaTexto, ativo && styles.chipTextoAtivo]}>{d.letra}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </>
+                    )}
+
+                    <Text style={[styles.label, { marginTop: 12 }]}>A cada</Text>
+                    <View style={styles.linha}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="1"
+                        placeholderTextColor={theme.colors.textTertiary}
+                        keyboardType="number-pad"
+                        value={intervaloRecorrencia}
+                        onChangeText={setIntervaloRecorrencia}
+                      />
+                      <View style={[styles.input, { flex: 2, justifyContent: 'center' }]}>
+                        <Text style={{ color: theme.colors.text, fontFamily: theme.font.regular, fontSize: 15 }}>
+                          {unidadeRotulo}
                         </Text>
-                      </TouchableOpacity>
-                    ))}
+                      </View>
+                    </View>
+
+                    <Text style={[styles.label, { marginTop: 12 }]}>Termina</Text>
+                    <View style={styles.chipsContainer}>
+                      {FIM_RECORRENCIA_OPCOES.map((f) => (
+                        <TouchableOpacity
+                          key={f.chave}
+                          style={[styles.statusChip, fimRecorrencia === f.chave && styles.statusChipAtivo]}
+                          onPress={() => setFimRecorrencia(f.chave)}
+                        >
+                          <Text style={[styles.statusChipTexto, fimRecorrencia === f.chave && styles.chipTextoAtivo]}>
+                            {f.rotulo}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {fimRecorrencia === 'apos' && (
+                      <View style={styles.linha}>
+                        <TextInput
+                          style={[styles.input, { flex: 1, marginTop: 10 }]}
+                          placeholder="4"
+                          placeholderTextColor={theme.colors.textTertiary}
+                          keyboardType="number-pad"
+                          value={qtdOcorrencias}
+                          onChangeText={setQtdOcorrencias}
+                        />
+                        <View style={[styles.input, { flex: 2, marginTop: 10, justifyContent: 'center' }]}>
+                          <Text style={{ color: theme.colors.text, fontFamily: theme.font.regular, fontSize: 15 }}>
+                            ocorrências (incluindo esta)
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+
+                    {fimRecorrencia === 'data' && (
+                      <View style={{ marginTop: 10 }}>
+                        <CampoDataHora
+                          valor={isoParaDate(dataFimRecorrencia || data)}
+                          modo="date"
+                          aoAlterar={(d) => setDataFimRecorrencia(dateParaIso(d))}
+                          textoExibido={dataFimRecorrencia ? formatarDataBR(dataFimRecorrencia) : 'Selecionar data final'}
+                          icone="calendar-outline"
+                        />
+                      </View>
+                    )}
+
+                    {fimRecorrencia === 'nunca' && (
+                      <Text style={styles.dica}>Serão criados até 104 agendamentos a partir desta data.</Text>
+                    )}
                   </View>
-                  <Text style={[styles.label, { marginTop: 12 }]}>Quantas vezes (incluindo esta)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="4"
-                    placeholderTextColor={theme.colors.textTertiary}
-                    keyboardType="number-pad"
-                    value={qtdRepeticoes}
-                    onChangeText={setQtdRepeticoes}
-                  />
-                </View>
-              )}
+                );
+              })()}
             </>
           )}
 
@@ -765,6 +892,12 @@ const styles = StyleSheet.create({
   statusChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
   statusChipTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.medium, fontSize: 13 },
   chipTextoAtivo: { color: theme.colors.primary },
+  diaSemanaCirculo: {
+    width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: theme.colors.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.surface,
+  },
+  diaSemanaCirculoAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  diaSemanaTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.medium, fontSize: 13 },
   aviso: { color: theme.colors.danger, fontFamily: theme.font.regular, fontSize: 13, marginTop: 8 },
   dica: { color: theme.colors.primary, fontFamily: theme.font.regular, fontSize: 12, marginTop: 6 },
   dicaAlerta: { color: theme.colors.warning, fontFamily: theme.font.medium },

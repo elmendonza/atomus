@@ -50,3 +50,59 @@ export function somarMeses(iso: string, meses: number): string {
   alvo.setDate(Math.min(diaOriginal, ultimoDiaDoMes));
   return dateParaIso(alvo);
 }
+
+export type UnidadeRecorrencia = 'dia' | 'semana' | 'mes' | 'ano';
+export type FimRecorrencia = 'nunca' | 'apos' | 'data';
+
+const LIMITE_SEGURANCA_OCORRENCIAS = 104;
+
+/** Gera as datas (ISO, ordem crescente, incluindo dataBase quando aplicável) de uma recorrência. */
+export function gerarOcorrenciasRecorrencia(params: {
+  dataBase: string;
+  unidade: UnidadeRecorrencia;
+  intervalo: number;
+  diasSemana?: number[];
+  fim: FimRecorrencia;
+  quantidadeOcorrencias?: number;
+  dataFim?: string;
+}): string[] {
+  const { dataBase, unidade, diasSemana, fim, dataFim } = params;
+  const passo = Math.max(1, params.intervalo || 1);
+  const limite =
+    fim === 'apos'
+      ? Math.max(1, Math.min(LIMITE_SEGURANCA_OCORRENCIAS, params.quantidadeOcorrencias || 1))
+      : LIMITE_SEGURANCA_OCORRENCIAS;
+  const resultado: string[] = [];
+
+  if (unidade === 'semana' && diasSemana && diasSemana.length > 0) {
+    const diasOrdenados = [...diasSemana].sort((a, b) => a - b);
+    const inicioSemana = isoParaDate(dataBase);
+    inicioSemana.setDate(inicioSemana.getDate() - inicioSemana.getDay());
+    for (let semana = 0; resultado.length < limite && semana < 300; semana++) {
+      for (const dow of diasOrdenados) {
+        const d = new Date(inicioSemana);
+        d.setDate(d.getDate() + dow + semana * 7 * passo);
+        const iso = dateParaIso(d);
+        if (iso < dataBase) continue;
+        if (fim === 'data' && dataFim && iso > dataFim) return resultado;
+        resultado.push(iso);
+        if (resultado.length >= limite) break;
+      }
+    }
+    return resultado.sort();
+  }
+
+  for (let i = 0; resultado.length < limite && i < 400; i++) {
+    const atual =
+      unidade === 'dia'
+        ? somarDias(dataBase, passo * i)
+        : unidade === 'semana'
+          ? somarDias(dataBase, 7 * passo * i)
+          : unidade === 'mes'
+            ? somarMeses(dataBase, passo * i)
+            : somarMeses(dataBase, 12 * passo * i);
+    if (fim === 'data' && dataFim && atual > dataFim) break;
+    resultado.push(atual);
+  }
+  return resultado;
+}

@@ -6,10 +6,12 @@ import { CalendarList, LocaleConfig } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { AgendaTimeline, type DiaTimeline, type EventoTimeline } from '@/components/agenda-timeline';
+import { EventoPopup, type EventoPopupInfo } from '@/components/evento-popup';
 import { SwipePager } from '@/components/swipe-pager';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
-import { hoje, dateParaIso, isoParaDate } from '@/src/utils/tempo';
+import { hoje, dateParaIso, isoParaDate, formatarDataBR } from '@/src/utils/tempo';
+import { alertar } from '@/src/utils/alerta';
 
 LocaleConfig.locales['pt-br'] = {
   monthNames: [
@@ -33,6 +35,7 @@ const DIAS_SEMANA_NOME = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'S
 
 type Atendimento = {
   id: string;
+  paciente_id: string;
   data: string;
   hora: string;
   hora_fim: string;
@@ -92,11 +95,14 @@ export default function AgendaScreen() {
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
   const [semanaInicio, setSemanaInicio] = useState(inicioDaSemana(hoje()));
   const [diaSelecionado, setDiaSelecionado] = useState(hoje());
+  const [eventoSelecionado, setEventoSelecionado] = useState<EventoPopupInfo | null>(null);
+  const [desfazer, setDesfazer] = useState<{ mensagem: string; aoDesfazer: () => void } | null>(null);
+  const desfazerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const carregarDados = useCallback(async () => {
     const { data: rows } = await supabase
       .from('atendimentos')
-      .select('id, data, hora, hora_fim, procedimento, status, pacientes(nome), clinicas(nome, cor)')
+      .select('id, paciente_id, data, hora, hora_fim, procedimento, status, pacientes(nome), clinicas(nome, cor)')
       .order('hora');
 
     const todos: Atendimento[] = (rows ?? []).map((r: any) => ({
@@ -146,7 +152,120 @@ export default function AgendaScreen() {
     [diaSelecionado]
   );
 
-  const aoPressionarEvento = useCallback((id: string) => router.push(`/modal?id=${id}`), [router]);
+  const aoPressionarEvento = useCallback(
+    (id: string) => {
+      const item = atendimentos.find((a) => a.id === id);
+      if (!item) return;
+      setEventoSelecionado({
+        id: item.id,
+        titulo: item.paciente_nome,
+        procedimento: item.procedimento,
+        clinicaNome: item.clinica_nome,
+        cor: item.clinica_cor || COR_PARTICULAR,
+        data: item.data,
+        hora: item.hora,
+        horaFim: item.hora_fim,
+      });
+    },
+    [atendimentos]
+  );
+
+  const moverAtendimento = useCallback(
+    async (id: string, novaData: string, novaHora: string, novaHoraFim: string, mostrarDesfazer = true) => {
+      const original = atendimentos.find((a) => a.id === id);
+      if (!original) return;
+      const anterior = { data: original.data, hora: original.hora, hora_fim: original.hora_fim };
+
+      setAtendimentos((atual) =>
+        atual.map((a) => (a.id === id ? { ...a, data: novaData, hora: novaHora, hora_fim: novaHoraFim } : a))
+      );
+
+      const { error } = await supabase
+        .from('atendimentos')
+        .update({ data: novaData, hora: novaHora, hora_fim: novaHoraFim })
+        .eq('id', id);
+
+      if (error) {
+        setAtendimentos((atual) =>
+          atual.map((a) => (a.id === id ? { ...a, ...anterior } : a))
+        );
+        alertar('Erro ao mover atendimento', error.message);
+        return;
+      }
+
+      if (desfazerTimeoutRef.current) clearTimeout(desfazerTimeoutRef.current);
+      if (mostrarDesfazer) {
+        setDesfazer({
+          mensagem: `Movido para ${formatarDataBR(novaData)} às ${novaHora}`,
+          aoDesfazer: () => {
+            setDesfazer(null);
+            moverAtendimento(id, anterior.data, anterior.hora, anterior.hora_fim, false);
+          },
+        });
+        desfazerTimeoutRef.current = setTimeout(() => setDesfazer(null), 6000);
+      } else {
+        setDesfazer(null);
+      }
+    },
+    [atendimentos]
+  );
+
+  const duplicarAtendimento = useCallback(async (id: string) => {
+    setEventoSelecionado(null);
+    const { data: original, error: erroBusca } = await supabase
+      .from('atendimentos')
+      .select('paciente_id, clinica_id, data, hora, hora_fim, procedimento, valor, forma_pagamento')
+      .eq('id', id)
+      .single();
+    if (erroBusca || !original) {
+      alertar('Erro ao duplicar atendimento', erroBusca?.message ?? 'Tente novamente.');
+      return;
+    }
+    const { error: erroInsercao } = await supabase.from('atendimentos').insert({
+      ...original,
+      status: 'agendado',
+      pago: false,
+      data_pagamento: null,
+    });
+    if (erroInsercao) {
+      alertar('Erro ao duplicar atendimento', erroInsercao.message);
+      return;
+    }
+    carregarDados();
+  }, [carregarDados]);
+
+  const excluirAtendimento = useCallback((id: string) => {
+    setEventoSelecionado(null);
+    alertar('Excluir atendimento', 'Tem certeza que deseja excluir este atendimento?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          const atendimento = atendimentos.find((a) => a.id === id);
+          const { error } = await supabase.from('atendimentos').delete().eq('id', id);
+          if (error) {
+            alertar('Erro ao excluir atendimento', error.message);
+            return;
+          }
+          if (atendimento?.paciente_id) {
+            const { data: pacoteExistente } = await supabase
+              .from('pacotes')
+              .select('id, sessoes_usadas')
+              .eq('paciente_id', atendimento.paciente_id)
+              .maybeSingle();
+            if (pacoteExistente) {
+              await supabase
+                .from('pacotes')
+                .update({ sessoes_usadas: Math.max(0, pacoteExistente.sessoes_usadas - 1) })
+                .eq('id', pacoteExistente.id);
+            }
+          }
+          carregarDados();
+        },
+      },
+    ]);
+  }, [atendimentos, carregarDados]);
 
   const eventosPorDia = useMemo(() => {
     const mapa: Record<string, EventoTimeline[]> = {};
@@ -263,6 +382,7 @@ export default function AgendaScreen() {
                 dias={paginasSemana[String(offset) as '-1' | '0' | '1']}
                 eventosPorDia={eventosPorDia}
                 onPressEvento={aoPressionarEvento}
+                onMoverEvento={moverAtendimento}
                 compacto
               />
             )}
@@ -290,6 +410,7 @@ export default function AgendaScreen() {
                 dias={paginasDia[String(offset) as '-1' | '0' | '1']}
                 eventosPorDia={eventosPorDia}
                 onPressEvento={aoPressionarEvento}
+                onMoverEvento={moverAtendimento}
                 compacto={false}
               />
             )}
@@ -304,6 +425,26 @@ export default function AgendaScreen() {
       >
         <Ionicons name="add" size={26} color="#fff" />
       </TouchableOpacity>
+
+      <EventoPopup
+        evento={eventoSelecionado}
+        onFechar={() => setEventoSelecionado(null)}
+        onEditar={(id) => {
+          setEventoSelecionado(null);
+          router.push(`/modal?id=${id}`);
+        }}
+        onDuplicar={duplicarAtendimento}
+        onExcluir={excluirAtendimento}
+      />
+
+      {desfazer && (
+        <View style={styles.toast}>
+          <Text style={styles.toastTexto} numberOfLines={1}>{desfazer.mensagem}</Text>
+          <TouchableOpacity onPress={desfazer.aoDesfazer} hitSlop={8}>
+            <Text style={styles.toastBotao}>DESFAZER</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -388,4 +529,20 @@ const styles = StyleSheet.create({
       android: { elevation: 4 },
     }),
   },
+  toast: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: theme.colors.text,
+    borderRadius: theme.radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  toastTexto: { flex: 1, color: theme.colors.background, fontFamily: theme.font.regular, fontSize: 13 },
+  toastBotao: { color: theme.colors.primaryLight, fontFamily: theme.font.bold, fontSize: 13 },
 });

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, GestureResponderEvent } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { theme } from '@/src/theme';
 
@@ -12,6 +12,7 @@ const ALTURA_HORA_PADRAO = 45; // usado só até medirmos a tela de verdade
 const DURACAO_PADRAO_MIN = 60;
 const LARGURA_LABEL_HORA = 42;
 const HORAS = Array.from({ length: 24 }, (_, i) => i);
+const DISTANCIA_MINIMA_ARRASTO = 6; // px — abaixo disso, tratamos como toque (abre popup), não arrasto
 
 export type EventoTimeline = {
   id: string;
@@ -28,6 +29,15 @@ function paraMinutos(hora: string) {
   return (hh || 0) * 60 + (mm || 0);
 }
 
+function formatarMinutos(minutos: number) {
+  const total = Math.max(0, Math.min(Math.round(minutos), 23 * 60 + 59));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function arredondarPara15(minutos: number) {
+  return Math.round(minutos / 15) * 15;
+}
+
 export type DiaTimeline = {
   iso: string;
   letra: string;
@@ -35,10 +45,21 @@ export type DiaTimeline = {
   hoje: boolean;
 };
 
+type Arrasto = {
+  id: string;
+  tipo: 'mover' | 'redimensionar';
+  indiceDia: number;
+  startPageX: number;
+  startPageY: number;
+  horaOriginal: string;
+  horaFimOriginal: string;
+};
+
 type Props = {
   dias: DiaTimeline[];
   eventosPorDia: Record<string, EventoTimeline[]>;
   onPressEvento: (id: string) => void;
+  onMoverEvento?: (id: string, novaData: string, novaHora: string, novaHoraFim: string) => void;
   compacto?: boolean;
 };
 
@@ -46,12 +67,24 @@ function pad(n: number) {
   return String(n).padStart(2, '0');
 }
 
-export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia, onPressEvento, compacto = true }: Props) {
+export const AgendaTimeline = memo(function AgendaTimeline({
+  dias,
+  eventosPorDia,
+  onPressEvento,
+  onMoverEvento,
+  compacto = true,
+}: Props) {
   const [largura, setLargura] = useState(0);
   const [alturaContainer, setAlturaContainer] = useState(0);
   const [agora, setAgora] = useState(new Date());
   const scrollRef = useRef<ScrollView>(null);
   const jaRolou = useRef(false);
+
+  const arrastoRef = useRef<Arrasto | null>(null);
+  const deltaAtualRef = useRef({ x: 0, y: 0 });
+  const [arrastando, setArrastando] = useState<{ id: string; tipo: 'mover' | 'redimensionar'; deltaX: number; deltaY: number } | null>(
+    null
+  );
 
   const alturaHora = alturaContainer > 0 ? alturaContainer / HORAS_VISIVEIS : ALTURA_HORA_PADRAO;
 
@@ -77,6 +110,64 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
   const larguraColuna = largura > 0 ? (largura - LARGURA_LABEL_HORA) / dias.length : 0;
   const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
 
+  function iniciarArrasto(evt: GestureResponderEvent, ev: EventoTimeline, indiceDia: number, tipo: 'mover' | 'redimensionar') {
+    arrastoRef.current = {
+      id: ev.id,
+      tipo,
+      indiceDia,
+      startPageX: evt.nativeEvent.pageX,
+      startPageY: evt.nativeEvent.pageY,
+      horaOriginal: ev.hora,
+      horaFimOriginal: ev.horaFim,
+    };
+    deltaAtualRef.current = { x: 0, y: 0 };
+    setArrastando({ id: ev.id, tipo, deltaX: 0, deltaY: 0 });
+  }
+
+  function moverArrasto(evt: GestureResponderEvent) {
+    const info = arrastoRef.current;
+    if (!info) return;
+    const deltaX = evt.nativeEvent.pageX - info.startPageX;
+    const deltaY = evt.nativeEvent.pageY - info.startPageY;
+    deltaAtualRef.current = { x: deltaX, y: deltaY };
+    setArrastando({ id: info.id, tipo: info.tipo, deltaX, deltaY });
+  }
+
+  function finalizarArrasto() {
+    const info = arrastoRef.current;
+    const { x: deltaX, y: deltaY } = deltaAtualRef.current;
+    arrastoRef.current = null;
+    deltaAtualRef.current = { x: 0, y: 0 };
+    setArrastando(null);
+    if (!info) return;
+
+    const distancia = Math.hypot(deltaX, deltaY);
+    if (distancia < DISTANCIA_MINIMA_ARRASTO) {
+      onPressEvento(info.id);
+      return;
+    }
+    if (!onMoverEvento || alturaHora === 0) return;
+
+    const minutosPorPixel = 60 / alturaHora;
+    const inicioOriginalMin = paraMinutos(info.horaOriginal);
+    const fimOriginalMin = paraMinutos(info.horaFimOriginal);
+    const duracaoOriginal = Math.max(15, fimOriginalMin - inicioOriginalMin);
+
+    if (info.tipo === 'redimensionar') {
+      const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+      const novoFimMin = Math.max(inicioOriginalMin + 15, fimOriginalMin + deltaMinutos);
+      onMoverEvento(info.id, dias[info.indiceDia].iso, info.horaOriginal, formatarMinutos(novoFimMin));
+      return;
+    }
+
+    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+    const novoInicioMin = Math.max(0, Math.min(1440 - duracaoOriginal, inicioOriginalMin + deltaMinutos));
+    const novoFimMin = novoInicioMin + duracaoOriginal;
+    const deltaColunas = larguraColuna > 0 ? Math.round(deltaX / larguraColuna) : 0;
+    const novoIndiceDia = Math.max(0, Math.min(dias.length - 1, info.indiceDia + deltaColunas));
+    onMoverEvento(info.id, dias[novoIndiceDia].iso, formatarMinutos(novoInicioMin), formatarMinutos(novoFimMin));
+  }
+
   return (
     <View style={styles.container}>
       {dias.length > 1 && (
@@ -97,6 +188,7 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
         ref={scrollRef}
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!arrastando}
         onLayout={(e) => {
           setLargura(e.nativeEvent.layout.width);
           setAlturaContainer(e.nativeEvent.layout.height);
@@ -116,7 +208,7 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
             ))}
           </View>
 
-          {dias.map((dia) => (
+          {dias.map((dia, indiceDia) => (
             <View
               key={dia.iso}
               style={[
@@ -132,17 +224,32 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
                 const inicioMin = paraMinutos(ev.hora);
                 const fimMin = paraMinutos(ev.horaFim);
                 const duracaoMin = fimMin > inicioMin ? fimMin - inicioMin : DURACAO_PADRAO_MIN;
+                const estaArrastando = arrastando?.id === ev.id;
+                const deltaMover = estaArrastando && arrastando!.tipo === 'mover' ? arrastando! : null;
+                const deltaRedimensionar = estaArrastando && arrastando!.tipo === 'redimensionar' ? arrastando! : null;
                 const topPx = inicioMin * (alturaHora / 60);
-                const alturaPx = Math.max(duracaoMin * (alturaHora / 60), compacto ? 30 : 26);
+                const alturaBase = Math.max(duracaoMin * (alturaHora / 60), compacto ? 30 : 26);
+                const alturaPx = deltaRedimensionar ? Math.max(20, alturaBase + deltaRedimensionar.deltaY) : alturaBase;
                 return (
-                  <TouchableOpacity
+                  <View
                     key={ev.id}
                     style={[
                       styles.evento,
-                      { top: topPx, height: alturaPx, backgroundColor: ev.cor + '26', borderLeftColor: ev.cor },
+                      {
+                        top: topPx,
+                        height: alturaPx,
+                        backgroundColor: ev.cor + '26',
+                        borderLeftColor: ev.cor,
+                        zIndex: estaArrastando ? 10 : 1,
+                        opacity: estaArrastando ? 0.85 : 1,
+                        transform: deltaMover ? [{ translateX: deltaMover.deltaX }, { translateY: deltaMover.deltaY }] : undefined,
+                      },
                     ]}
-                    onPress={() => onPressEvento(ev.id)}
-                    activeOpacity={0.7}
+                    onStartShouldSetResponder={() => true}
+                    onResponderTerminationRequest={() => false}
+                    onResponderGrant={(e) => iniciarArrasto(e, ev, indiceDia, 'mover')}
+                    onResponderMove={moverArrasto}
+                    onResponderRelease={finalizarArrasto}
                   >
                     <Text
                       numberOfLines={compacto ? 2 : 1}
@@ -156,7 +263,20 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
                         {ev.hora}–{ev.horaFim} · {ev.procedimento || 'Consulta'}
                       </Text>
                     )}
-                  </TouchableOpacity>
+
+                    {!!onMoverEvento && (
+                      <View
+                        style={styles.alcaRedimensionar}
+                        onStartShouldSetResponder={() => true}
+                        onResponderTerminationRequest={() => false}
+                        onResponderGrant={(e) => iniciarArrasto(e, ev, indiceDia, 'redimensionar')}
+                        onResponderMove={moverArrasto}
+                        onResponderRelease={finalizarArrasto}
+                      >
+                        <View style={styles.alcaRedimensionarTraco} />
+                      </View>
+                    )}
+                  </View>
                 );
               })}
 
@@ -221,6 +341,24 @@ const styles = StyleSheet.create({
   },
   eventoTexto: { fontFamily: theme.font.medium },
   eventoDetalhe: { fontFamily: theme.font.regular, fontSize: 11, marginTop: 1, opacity: 0.85 },
+  alcaRedimensionar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 10,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    ...Platform.select({ web: { cursor: 'ns-resize' } as any, default: {} }),
+  },
+  alcaRedimensionarTraco: {
+    width: 20,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: theme.colors.text,
+    opacity: 0.25,
+    marginBottom: 2,
+  },
   linhaAgora: {
     position: 'absolute',
     left: -1,
