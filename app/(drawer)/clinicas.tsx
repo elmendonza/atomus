@@ -10,7 +10,7 @@ import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 
-const CORES = ['#1A73E8', '#D93025', '#1E8E3E', '#F29900', '#9334E6', '#12B5CB', '#E52592', '#795548'];
+const CORES = ['#AEC9FA', '#F7C5C2', '#B7E4C7', '#FBD9A5', '#D9C2F0', '#A6E8EE', '#F6B8D6', '#D2B8AC'];
 
 type Clinica = { id: string; nome: string; cor: string; percentual: number; endereco: string | null };
 

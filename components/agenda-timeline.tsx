@@ -9,7 +9,7 @@ const HORA_FIM_VISIVEL = 22;
 const HORAS_VISIVEIS = HORA_FIM_VISIVEL - HORA_INICIO_VISIVEL;
 const ALTURA_HORA_PADRAO = 45; // usado só até medirmos a tela de verdade
 
-const DURACAO_PADRAO_MIN = 50;
+const DURACAO_PADRAO_MIN = 60;
 const LARGURA_LABEL_HORA = 42;
 const HORAS = Array.from({ length: 24 }, (_, i) => i);
 
@@ -146,7 +146,7 @@ export const AgendaTimeline = memo(function AgendaTimeline({ dias, eventosPorDia
                   >
                     <Text
                       numberOfLines={compacto ? 2 : 1}
-                      style={[styles.eventoTexto, { color: ev.cor, fontSize: compacto ? 10 : 13 }]}
+                      style={[styles.eventoTexto, { color: theme.colors.text, fontSize: compacto ? 10 : 13 }]}
                     >
                       {ev.paciente_nome}
                       {!compacto ? ` · ${ev.clinica_nome || 'Particular'}` : ''}

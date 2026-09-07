@@ -1,4 +1,6 @@
-export const COR_PARTICULAR = '#5F6368';
+export const COR_PARTICULAR = '#D9C2F0';
+
+export const FORMAS_PAGAMENTO = ['Pix', 'Dinheiro', 'Cartão de crédito', 'Cartão de débito'] as const;
 
 export const theme = {
   colors: {

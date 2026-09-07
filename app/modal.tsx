@@ -7,9 +7,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
-import { theme } from '@/src/theme';
-import { isoParaDate, dateParaIso, formatarDataBR, horaParaDate, dateParaHora, hoje } from '@/src/utils/tempo';
+import { theme, COR_PARTICULAR, FORMAS_PAGAMENTO } from '@/src/theme';
+import { isoParaDate, dateParaIso, formatarDataBR, horaParaDate, dateParaHora, hoje, somarDias, somarMeses } from '@/src/utils/tempo';
 import { alertar } from '@/src/utils/alerta';
+import { formatarNumeroWhatsApp } from '@/src/utils/formato';
 
 type Clinica = { id: string; nome: string; cor: string; endereco: string | null };
 
@@ -25,9 +26,14 @@ type PacienteSugestao = {
 };
 
 const STATUS_OPCOES = ['agendado', 'realizado', 'cancelado'] as const;
-const FORMAS_PAGAMENTO = ['Pix', 'Dinheiro', 'Cartão de crédito', 'Cartão de débito', 'Outro'] as const;
+const PROCEDIMENTOS_OPCOES = ['Acupuntura', 'Fisioterapia', 'Reabilitação', 'Outro'] as const;
+const REPETICAO_OPCOES = [
+  { chave: 'semanal', rotulo: 'Semanal' },
+  { chave: 'quinzenal', rotulo: 'A cada 2 semanas' },
+  { chave: 'mensal', rotulo: 'Mensal (mesmo dia)' },
+] as const;
 const REGEX_HORA = /^([0-1]?\d|2[0-3]):([0-5]\d)$/;
-const DURACAO_PADRAO_MIN = 50;
+const DURACAO_PADRAO_MIN = 60;
 
 function paraMinutos(hora: string) {
   const [hh, mm] = hora.split(':').map(Number);
@@ -37,12 +43,6 @@ function paraMinutos(hora: string) {
 function formatarMinutos(minutos: number) {
   const total = Math.max(0, Math.min(minutos, 23 * 60 + 59));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
-function formatarNumeroWhatsApp(telefoneBruto: string) {
-  let numeros = telefoneBruto.replace(/\D/g, '');
-  if (!numeros.startsWith('55')) numeros = '55' + numeros;
-  return numeros;
 }
 
 function montarMensagemConfirmacao(dataIso: string, horaInicio: string) {
@@ -64,7 +64,7 @@ export default function ModalAtendimento() {
 
   const [clinicas, setClinicas] = useState<Clinica[]>([]);
   const [clinicaId, setClinicaId] = useState<string | null>(null);
-  const [modoParticular, setModoParticular] = useState(false);
+  const [modoParticular, setModoParticular] = useState(true);
 
   const [nomePaciente, setNomePaciente] = useState('');
   const [pacienteVinculadoId, setPacienteVinculadoId] = useState<string | null>(null);
@@ -77,7 +77,12 @@ export default function ModalAtendimento() {
   const [hora, setHora] = useState('');
   const [horaFim, setHoraFim] = useState('');
   const duracaoRef = useRef(DURACAO_PADRAO_MIN);
+  const [repetir, setRepetir] = useState(false);
+  const [padraoRepeticao, setPadraoRepeticao] = useState<(typeof REPETICAO_OPCOES)[number]['chave']>('semanal');
+  const [qtdRepeticoes, setQtdRepeticoes] = useState('4');
   const [procedimento, setProcedimento] = useState('');
+  const [procedimentoChip, setProcedimentoChip] = useState<string>('');
+  const [procedimentoOutro, setProcedimentoOutro] = useState('');
   const [valor, setValor] = useState('');
   const [formaPagamento, setFormaPagamento] = useState('');
   const [status, setStatus] = useState<(typeof STATUS_OPCOES)[number]>('agendado');
@@ -108,7 +113,15 @@ export default function ModalAtendimento() {
             setHora(item.hora);
             setHoraFim(item.hora_fim);
             duracaoRef.current = Math.max(paraMinutos(item.hora_fim) - paraMinutos(item.hora), 5);
-            setProcedimento(item.procedimento || '');
+            const procedimentoCarregado = item.procedimento || '';
+            setProcedimento(procedimentoCarregado);
+            if (['Acupuntura', 'Fisioterapia', 'Reabilitação'].includes(procedimentoCarregado)) {
+              setProcedimentoChip(procedimentoCarregado);
+              setProcedimentoOutro('');
+            } else {
+              setProcedimentoChip(procedimentoCarregado ? 'Outro' : '');
+              setProcedimentoOutro(procedimentoCarregado);
+            }
             setValor(item.valor ? String(item.valor).replace('.', ',') : '');
             setFormaPagamento(item.forma_pagamento || '');
             setStatus((item.status as any) || 'agendado');
@@ -124,8 +137,6 @@ export default function ModalAtendimento() {
             carregarPacote(item.paciente_id);
           }
           setCarregado(true);
-        } else if ((rows ?? []).length) {
-          setClinicaId((atual) => atual ?? (rows as Clinica[])[0].id);
         }
       })();
     }, [atendimentoId])
@@ -309,9 +320,49 @@ export default function ModalAtendimento() {
           .update({ sessoes_usadas: pacoteExistente.sessoes_usadas + 1 })
           .eq('id', pacoteExistente.id);
       }
+
+      if (repetir) {
+        const quantidade = Math.max(1, Math.min(52, parseInt(qtdRepeticoes, 10) || 1));
+        let sessoesAdicionais = 0;
+        for (let i = 1; i < quantidade; i++) {
+          const proximaData =
+            padraoRepeticao === 'semanal'
+              ? somarDias(data, 7 * i)
+              : padraoRepeticao === 'quinzenal'
+                ? somarDias(data, 14 * i)
+                : somarMeses(data, i);
+          const { error: erroRepeticao } = await supabase.from('atendimentos').insert({
+            ...dadosAtendimento,
+            data: proximaData,
+            status: 'agendado',
+            pago: false,
+            data_pagamento: null,
+          });
+          if (!erroRepeticao) sessoesAdicionais += 1;
+        }
+        if (pacoteExistente && sessoesAdicionais > 0) {
+          await supabase
+            .from('pacotes')
+            .update({ sessoes_usadas: pacoteExistente.sessoes_usadas + 1 + sessoesAdicionais })
+            .eq('id', pacoteExistente.id);
+        }
+      }
     }
 
-    router.back();
+    if (telefone.trim()) {
+      alertar('Confirmação por WhatsApp', 'Deseja enviar a confirmação do agendamento pelo WhatsApp?', [
+        { text: 'Não', style: 'cancel', onPress: () => router.back() },
+        {
+          text: 'Sim',
+          onPress: () => {
+            enviarConfirmacaoWhatsApp();
+            router.back();
+          },
+        },
+      ]);
+    } else {
+      router.back();
+    }
   }
 
   function enviarConfirmacaoWhatsApp() {
@@ -410,18 +461,18 @@ export default function ModalAtendimento() {
           <Text style={styles.label}>Tutor</Text>
           <TextInput style={styles.input} placeholder="Nome do tutor" placeholderTextColor={theme.colors.textTertiary} value={tutor} onChangeText={setTutor} />
 
-          <Text style={styles.label}>Telefone do tutor (com DDD)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="(11) 99999-9999"
-            placeholderTextColor={theme.colors.textTertiary}
-            keyboardType="phone-pad"
-            value={telefone}
-            onChangeText={setTelefone}
-          />
-
           <Text style={styles.label}>Clínica</Text>
           <View style={styles.chipsContainer}>
+            <TouchableOpacity
+              style={[styles.particularChip, modoParticular && styles.particularChipAtivo]}
+              onPress={() => {
+                setModoParticular(true);
+                setClinicaId(null);
+              }}
+            >
+              <Ionicons name="home-outline" size={14} color={modoParticular ? '#fff' : COR_PARTICULAR} />
+              <Text style={[styles.clinicaChipTexto, modoParticular && styles.clinicaChipTextoAtivo]}>Particular</Text>
+            </TouchableOpacity>
             {clinicas.map((c) => (
               <TouchableOpacity
                 key={c.id}
@@ -440,16 +491,6 @@ export default function ModalAtendimento() {
                 </Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity
-              style={[styles.particularChip, modoParticular && styles.particularChipAtivo]}
-              onPress={() => {
-                setModoParticular(true);
-                setClinicaId(null);
-              }}
-            >
-              <Ionicons name="home-outline" size={14} color={modoParticular ? '#fff' : theme.colors.textSecondary} />
-              <Text style={[styles.clinicaChipTexto, modoParticular && styles.clinicaChipTextoAtivo]}>Particular</Text>
-            </TouchableOpacity>
           </View>
           {clinicas.length === 0 && !modoParticular && (
             <Text style={styles.aviso}>Cadastre uma clínica na aba &quot;Clínicas&quot; ou use &quot;Particular&quot;.</Text>
@@ -508,13 +549,71 @@ export default function ModalAtendimento() {
             <Text style={styles.dica}>💡 Horário sugerido no cadastro: {sugestaoHorarioTexto}</Text>
           )}
 
-          <TouchableOpacity style={styles.botaoWhatsapp} onPress={enviarConfirmacaoWhatsApp} activeOpacity={0.85}>
-            <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-            <Text style={styles.botaoWhatsappTexto}>Confirmar agendamento pelo WhatsApp</Text>
-          </TouchableOpacity>
+          {!atendimentoId && (
+            <>
+              <TouchableOpacity style={styles.linhaPago} onPress={() => setRepetir(!repetir)} activeOpacity={0.7}>
+                <View style={[styles.checkbox, repetir && styles.checkboxAtivo]}>
+                  {repetir && <Text style={styles.checkboxMarca}>✓</Text>}
+                </View>
+                <Text style={styles.label2}>Repetir agendamento</Text>
+              </TouchableOpacity>
+
+              {repetir && (
+                <View style={{ marginTop: 10 }}>
+                  <View style={styles.chipsContainer}>
+                    {REPETICAO_OPCOES.map((r) => (
+                      <TouchableOpacity
+                        key={r.chave}
+                        style={[styles.statusChip, padraoRepeticao === r.chave && styles.statusChipAtivo]}
+                        onPress={() => setPadraoRepeticao(r.chave)}
+                      >
+                        <Text style={[styles.statusChipTexto, padraoRepeticao === r.chave && styles.chipTextoAtivo]}>
+                          {r.rotulo}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={[styles.label, { marginTop: 12 }]}>Quantas vezes (incluindo esta)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="4"
+                    placeholderTextColor={theme.colors.textTertiary}
+                    keyboardType="number-pad"
+                    value={qtdRepeticoes}
+                    onChangeText={setQtdRepeticoes}
+                  />
+                </View>
+              )}
+            </>
+          )}
 
           <Text style={styles.label}>Procedimento</Text>
-          <TextInput style={styles.input} placeholder="Consulta, vacina, etc." placeholderTextColor={theme.colors.textTertiary} value={procedimento} onChangeText={setProcedimento} />
+          <View style={styles.chipsContainer}>
+            {PROCEDIMENTOS_OPCOES.map((p) => (
+              <TouchableOpacity
+                key={p}
+                style={[styles.statusChip, procedimentoChip === p && styles.statusChipAtivo]}
+                onPress={() => {
+                  setProcedimentoChip(p);
+                  setProcedimento(p === 'Outro' ? procedimentoOutro : p);
+                }}
+              >
+                <Text style={[styles.statusChipTexto, procedimentoChip === p && styles.chipTextoAtivo]}>{p}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {procedimentoChip === 'Outro' && (
+            <TextInput
+              style={[styles.input, { marginTop: 8 }]}
+              placeholder="Descreva o procedimento"
+              placeholderTextColor={theme.colors.textTertiary}
+              value={procedimentoOutro}
+              onChangeText={(texto) => {
+                setProcedimentoOutro(texto);
+                setProcedimento(texto);
+              }}
+            />
+          )}
 
           <Text style={styles.label}>Status</Text>
           <View style={styles.chipsContainer}>
@@ -616,12 +715,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     borderWidth: 2,
-    borderColor: theme.colors.border,
+    borderColor: COR_PARTICULAR,
     borderRadius: theme.radius.full,
     paddingVertical: 8,
     paddingHorizontal: 14,
   },
-  particularChipAtivo: { backgroundColor: theme.colors.textSecondary, borderColor: theme.colors.textSecondary },
+  particularChipAtivo: { backgroundColor: COR_PARTICULAR, borderColor: COR_PARTICULAR },
   enderecoBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -643,17 +742,6 @@ const styles = StyleSheet.create({
   aviso: { color: theme.colors.danger, fontFamily: theme.font.regular, fontSize: 13, marginTop: 8 },
   dica: { color: theme.colors.primary, fontFamily: theme.font.regular, fontSize: 12, marginTop: 6 },
   dicaAlerta: { color: theme.colors.warning, fontFamily: theme.font.medium },
-  botaoWhatsapp: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#25D366',
-    padding: 13,
-    borderRadius: theme.radius.md,
-    marginTop: 16,
-  },
-  botaoWhatsappTexto: { color: '#fff', fontFamily: theme.font.medium, fontSize: 14 },
   linhaPago: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 22 },
   checkbox: {
     width: 22, height: 22, borderRadius: 5, borderWidth: 2, borderColor: theme.colors.border,

@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
-import { theme } from '@/src/theme';
+import { theme, COR_PARTICULAR } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 
 type Paciente = {
@@ -15,7 +15,22 @@ type Paciente = {
   forma_pagamento_preferida: string | null;
   dias_preferidos: string | null;
   horario_preferido: string | null;
+  clinica_id: string | null;
+  created_at: string;
 };
+
+type Clinica = { id: string; nome: string; cor: string };
+
+const ORDENACAO_OPCOES = [
+  { chave: 'az', rotulo: 'A a Z' },
+  { chave: 'za', rotulo: 'Z a A' },
+  { chave: 'antigos', rotulo: 'Mais antigos' },
+  { chave: 'recentes', rotulo: 'Mais recentes' },
+  { chave: 'pendentes', rotulo: 'Pendentes' },
+  { chave: 'concluidos', rotulo: 'Concluídos' },
+] as const;
+
+type Ordenacao = (typeof ORDENACAO_OPCOES)[number]['chave'];
 
 function cadastroCompleto(p: Paciente) {
   return !!(p.forma_pagamento_preferida || p.dias_preferidos || p.horario_preferido);
@@ -24,18 +39,25 @@ function cadastroCompleto(p: Paciente) {
 export default function ClientesScreen() {
   const router = useRouter();
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
+  const [clinicas, setClinicas] = useState<Clinica[]>([]);
   const [busca, setBusca] = useState('');
+  const [clinicaFiltro, setClinicaFiltro] = useState<string | null>(null);
+  const [ordenacao, setOrdenacao] = useState<Ordenacao>('az');
 
   const carregar = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('pacientes')
-      .select('id, nome, tutor, forma_pagamento_preferida, dias_preferidos, horario_preferido')
-      .order('nome');
+    const [{ data, error }, { data: cli }] = await Promise.all([
+      supabase
+        .from('pacientes')
+        .select('id, nome, tutor, forma_pagamento_preferida, dias_preferidos, horario_preferido, clinica_id, created_at')
+        .order('nome'),
+      supabase.from('clinicas').select('id, nome, cor').order('nome'),
+    ]);
     if (error) {
       alertar('Erro ao carregar clientes', error.message);
       return;
     }
     setPacientes(data ?? []);
+    setClinicas(cli ?? []);
   }, []);
 
   useFocusEffect(
@@ -44,11 +66,33 @@ export default function ClientesScreen() {
     }, [carregar])
   );
 
-  const filtrados = pacientes.filter((p) => {
-    const termo = busca.trim().toLowerCase();
-    if (!termo) return true;
-    return p.nome.toLowerCase().includes(termo) || (p.tutor || '').toLowerCase().includes(termo);
-  });
+  const filtrados = pacientes
+    .filter((p) => {
+      const termo = busca.trim().toLowerCase();
+      const bateBusca = !termo || p.nome.toLowerCase().includes(termo) || (p.tutor || '').toLowerCase().includes(termo);
+      if (!bateBusca) return false;
+      if (clinicaFiltro === null) return true;
+      if (clinicaFiltro === 'particular') return !p.clinica_id;
+      return p.clinica_id === clinicaFiltro;
+    })
+    .sort((a, b) => {
+      switch (ordenacao) {
+        case 'az':
+          return a.nome.localeCompare(b.nome, 'pt-BR');
+        case 'za':
+          return b.nome.localeCompare(a.nome, 'pt-BR');
+        case 'antigos':
+          return a.created_at.localeCompare(b.created_at);
+        case 'recentes':
+          return b.created_at.localeCompare(a.created_at);
+        case 'pendentes':
+          return Number(cadastroCompleto(a)) - Number(cadastroCompleto(b));
+        case 'concluidos':
+          return Number(cadastroCompleto(b)) - Number(cadastroCompleto(a));
+        default:
+          return 0;
+      }
+    });
 
   const pendentes = filtrados.filter((p) => !cadastroCompleto(p)).length;
 
@@ -68,6 +112,50 @@ export default function ClientesScreen() {
           value={busca}
           onChangeText={setBusca}
         />
+      </View>
+
+      <View style={styles.filtrosContainer}>
+        <Text style={styles.filtroLabel}>Clínica</Text>
+        <View style={styles.chipsContainer}>
+          <TouchableOpacity
+            style={[styles.filtroChip, clinicaFiltro === null && styles.filtroChipAtivo]}
+            onPress={() => setClinicaFiltro(null)}
+          >
+            <Text style={[styles.filtroChipTexto, clinicaFiltro === null && styles.filtroChipTextoAtivo]}>Todas</Text>
+          </TouchableOpacity>
+          {clinicas.map((c) => (
+            <TouchableOpacity
+              key={c.id}
+              style={[styles.filtroChip, { borderColor: c.cor }, clinicaFiltro === c.id && { backgroundColor: c.cor, borderColor: c.cor }]}
+              onPress={() => setClinicaFiltro(c.id)}
+            >
+              <Text style={[styles.filtroChipTexto, clinicaFiltro === c.id && styles.filtroChipTextoAtivo]}>{c.nome}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={[
+              styles.filtroChip,
+              { borderColor: COR_PARTICULAR },
+              clinicaFiltro === 'particular' && { backgroundColor: COR_PARTICULAR, borderColor: COR_PARTICULAR },
+            ]}
+            onPress={() => setClinicaFiltro('particular')}
+          >
+            <Text style={[styles.filtroChipTexto, clinicaFiltro === 'particular' && styles.filtroChipTextoAtivo]}>Particular</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.filtroLabel, { marginTop: 10 }]}>Ordenar por</Text>
+        <View style={styles.chipsContainer}>
+          {ORDENACAO_OPCOES.map((o) => (
+            <TouchableOpacity
+              key={o.chave}
+              style={[styles.filtroChip, ordenacao === o.chave && styles.filtroChipAtivo]}
+              onPress={() => setOrdenacao(o.chave)}
+            >
+              <Text style={[styles.filtroChipTexto, ordenacao === o.chave && styles.filtroChipTextoAtivo]}>{o.rotulo}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {pendentes > 0 && (
@@ -115,6 +203,10 @@ export default function ClientesScreen() {
           );
         }}
       />
+
+      <TouchableOpacity style={styles.fab} onPress={() => router.push('/cliente')} activeOpacity={0.85}>
+        <Ionicons name="add" size={28} color="#fff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -144,6 +236,16 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   buscaInput: { flex: 1, fontSize: 14, fontFamily: theme.font.regular, color: theme.colors.text },
+  filtrosContainer: { marginHorizontal: theme.spacing.md, marginTop: 12 },
+  filtroLabel: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.medium, marginBottom: 6 },
+  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filtroChip: {
+    borderWidth: 1.5, borderColor: theme.colors.border, borderRadius: theme.radius.full,
+    paddingVertical: 6, paddingHorizontal: 12, backgroundColor: theme.colors.surface,
+  },
+  filtroChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  filtroChipTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.medium, fontSize: 12 },
+  filtroChipTextoAtivo: { color: theme.colors.primary },
   avisoPendentes: {
     color: theme.colors.warning,
     fontSize: 12,
@@ -174,4 +276,20 @@ const styles = StyleSheet.create({
   badgeTexto: { fontSize: 11, fontFamily: theme.font.medium },
   badgeTextoCompleto: { color: theme.colors.success },
   badgeTextoPendente: { color: theme.colors.warning },
+  fab: {
+    position: 'absolute',
+    right: theme.spacing.lg,
+    bottom: theme.spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
 });

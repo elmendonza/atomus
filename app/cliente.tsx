@@ -7,9 +7,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
-import { theme } from '@/src/theme';
+import { theme, COR_PARTICULAR, FORMAS_PAGAMENTO } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 import { horaParaDate, dateParaHora } from '@/src/utils/tempo';
+import { formatarTelefone } from '@/src/utils/formato';
 
 const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
@@ -17,8 +18,8 @@ type Clinica = { id: string; nome: string; cor: string; endereco: string | null 
 
 export default function ClienteScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string }>();
-  const pacienteId = params.id;
+  const params = useLocalSearchParams<{ id?: string }>();
+  const pacienteId = params.id ?? null;
 
   const [nome, setNome] = useState('');
   const [tutor, setTutor] = useState('');
@@ -47,6 +48,11 @@ export default function ClienteScreen() {
         const { data: cli } = await supabase.from('clinicas').select('id, nome, cor, endereco').order('nome');
         setClinicas(cli ?? []);
 
+        if (!pacienteId) {
+          setCarregado(true);
+          return;
+        }
+
         const { data: item, error } = await supabase
           .from('pacientes')
           .select('nome, tutor, telefone, forma_pagamento_preferida, dias_preferidos, horario_preferido, endereco, clinica_id, cpf, raca, idade, atendido_em_residencia')
@@ -57,7 +63,7 @@ export default function ClienteScreen() {
         } else if (item) {
           setNome(item.nome);
           setTutor(item.tutor || '');
-          setTelefone(item.telefone || '');
+          setTelefone(formatarTelefone(item.telefone || ''));
           setFormaPagamento(item.forma_pagamento_preferida || '');
           setDiasSelecionados(item.dias_preferidos ? item.dias_preferidos.split(',') : []);
           setHorario(item.horario_preferido || '');
@@ -95,40 +101,48 @@ export default function ClienteScreen() {
       return;
     }
     const residenciaAtiva = !modoParticular && atendidoEmResidencia;
-    const { error } = await supabase
-      .from('pacientes')
-      .update({
-        nome: nome.trim(),
-        tutor: tutor.trim(),
-        telefone: telefone.trim(),
-        forma_pagamento_preferida: formaPagamento.trim(),
-        dias_preferidos: diasSelecionados.join(','),
-        horario_preferido: horario.trim(),
-        clinica_id: modoParticular ? null : clinicaId,
-        endereco: modoParticular || residenciaAtiva ? endereco.trim() : '',
-        atendido_em_residencia: residenciaAtiva,
-        cpf: mostrarCompleto ? cpf.trim() : '',
-        raca: mostrarCompleto ? raca.trim() : '',
-        idade: mostrarCompleto ? idade.trim() : '',
-      })
-      .eq('id', pacienteId);
+    const dadosPaciente = {
+      nome: nome.trim(),
+      tutor: tutor.trim(),
+      telefone: telefone.trim(),
+      forma_pagamento_preferida: formaPagamento.trim(),
+      dias_preferidos: diasSelecionados.join(','),
+      horario_preferido: horario.trim(),
+      clinica_id: modoParticular ? null : clinicaId,
+      endereco: modoParticular || residenciaAtiva ? endereco.trim() : '',
+      atendido_em_residencia: residenciaAtiva,
+      cpf: mostrarCompleto ? cpf.trim() : '',
+      raca: mostrarCompleto ? raca.trim() : '',
+      idade: mostrarCompleto ? idade.trim() : '',
+    };
 
-    if (error) {
-      alertar('Erro ao salvar cliente', error.message);
-      return;
+    let idFinal = pacienteId;
+    if (idFinal) {
+      const { error } = await supabase.from('pacientes').update(dadosPaciente).eq('id', idFinal);
+      if (error) {
+        alertar('Erro ao salvar cliente', error.message);
+        return;
+      }
+    } else {
+      const { data: novo, error } = await supabase.from('pacientes').insert(dadosPaciente).select('id').single();
+      if (error || !novo) {
+        alertar('Erro ao criar cliente', error?.message ?? 'Tente novamente.');
+        return;
+      }
+      idFinal = novo.id;
     }
 
     if (temPacote) {
       const { data: existente } = await supabase
         .from('pacotes')
         .select('id')
-        .eq('paciente_id', pacienteId)
+        .eq('paciente_id', idFinal)
         .maybeSingle();
       if (!existente) {
-        await supabase.from('pacotes').insert({ paciente_id: pacienteId });
+        await supabase.from('pacotes').insert({ paciente_id: idFinal });
       }
     } else {
-      await supabase.from('pacotes').delete().eq('paciente_id', pacienteId);
+      await supabase.from('pacotes').delete().eq('paciente_id', idFinal);
     }
 
     router.back();
@@ -174,7 +188,7 @@ export default function ClienteScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="close" size={24} color={theme.colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitulo}>Cadastro do cliente</Text>
+        <Text style={styles.headerTitulo}>{pacienteId ? 'Cadastro do cliente' : 'Novo cliente'}</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -197,17 +211,21 @@ export default function ClienteScreen() {
           placeholderTextColor={theme.colors.textTertiary}
           keyboardType="phone-pad"
           value={telefone}
-          onChangeText={setTelefone}
+          onChangeText={(texto) => setTelefone(formatarTelefone(texto))}
         />
 
         <Text style={styles.label}>Forma de pagamento preferida</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Pix, cartão, dinheiro..."
-          placeholderTextColor={theme.colors.textTertiary}
-          value={formaPagamento}
-          onChangeText={setFormaPagamento}
-        />
+        <View style={styles.chipsContainer}>
+          {FORMAS_PAGAMENTO.map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.diaChip, formaPagamento === f && styles.diaChipAtivo]}
+              onPress={() => setFormaPagamento(f)}
+            >
+              <Text style={[styles.diaChipTexto, formaPagamento === f && styles.chipTextoAtivo]}>{f}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <Text style={styles.label}>Dias possíveis para atendimento</Text>
         <View style={styles.chipsContainer}>
@@ -261,7 +279,7 @@ export default function ClienteScreen() {
               setClinicaId(null);
             }}
           >
-            <Ionicons name="home-outline" size={14} color={modoParticular ? '#fff' : theme.colors.textSecondary} />
+            <Ionicons name="home-outline" size={14} color={modoParticular ? '#fff' : COR_PARTICULAR} />
             <Text style={[styles.clinicaChipTexto, modoParticular && styles.clinicaChipTextoAtivo]}>Particular</Text>
           </TouchableOpacity>
         </View>
@@ -363,9 +381,11 @@ export default function ClienteScreen() {
           <Text style={styles.botaoTexto}>Salvar cadastro</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.botaoExcluir} onPress={confirmarExclusao} activeOpacity={0.7}>
-          <Text style={styles.botaoExcluirTexto}>Excluir cliente</Text>
-        </TouchableOpacity>
+        {!!pacienteId && (
+          <TouchableOpacity style={styles.botaoExcluir} onPress={confirmarExclusao} activeOpacity={0.7}>
+            <Text style={styles.botaoExcluirTexto}>Excluir cliente</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -407,12 +427,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     borderWidth: 2,
-    borderColor: theme.colors.border,
+    borderColor: COR_PARTICULAR,
     borderRadius: theme.radius.full,
     paddingVertical: 8,
     paddingHorizontal: 14,
   },
-  particularChipAtivo: { backgroundColor: theme.colors.textSecondary, borderColor: theme.colors.textSecondary },
+  particularChipAtivo: { backgroundColor: COR_PARTICULAR, borderColor: COR_PARTICULAR },
   enderecoBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',

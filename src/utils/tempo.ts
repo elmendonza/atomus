@@ -35,3 +35,18 @@ export function dateParaHora(d: Date): string {
   const m = String(d.getMinutes()).padStart(2, '0');
   return `${h}:${m}`;
 }
+
+export function somarDias(iso: string, dias: number): string {
+  const d = isoParaDate(iso);
+  d.setDate(d.getDate() + dias);
+  return dateParaIso(d);
+}
+
+export function somarMeses(iso: string, meses: number): string {
+  const d = isoParaDate(iso);
+  const diaOriginal = d.getDate();
+  const alvo = new Date(d.getFullYear(), d.getMonth() + meses, 1);
+  const ultimoDiaDoMes = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate();
+  alvo.setDate(Math.min(diaOriginal, ultimoDiaDoMes));
+  return dateParaIso(alvo);
+}

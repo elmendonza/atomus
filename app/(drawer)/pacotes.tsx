@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
-  StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform,
+  StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -9,6 +9,7 @@ import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
+import { formatarNumeroWhatsApp } from '@/src/utils/formato';
 
 type Pacote = {
   id: string;
@@ -18,7 +19,18 @@ type Pacote = {
   minimo_renovacao: number;
   paciente_nome: string;
   paciente_tutor: string | null;
+  paciente_telefone: string | null;
 };
+
+function montarMensagemRenovacao(nomePaciente: string, restantes: number) {
+  return `Olá, tudo bem? ✨🤍
+
+Passando para te avisar que estamos chegando às últimas sessões do pacotinho da ${nomePaciente}. No momento, faltam apenas ${restantes} ${restantes === 1 ? 'sessão' : 'sessões'} para finalizarmos esse pacote.
+
+Já quis te avisar com antecedência para conseguirmos nos organizar direitinho e, caso vocês queiram continuar com o acompanhamento, já deixarmos a próxima renovação programada.
+
+Se tiver qualquer dúvida sobre os pacotes pode me chamar, ok?!`;
+}
 
 function precisaRenovar(item: Pacote) {
   return item.total_sessoes > 0 && item.total_sessoes - item.sessoes_usadas <= item.minimo_renovacao;
@@ -34,7 +46,7 @@ export default function PacotesScreen() {
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
       .from('pacotes')
-      .select('id, paciente_id, total_sessoes, sessoes_usadas, minimo_renovacao, pacientes(nome, tutor)')
+      .select('id, paciente_id, total_sessoes, sessoes_usadas, minimo_renovacao, pacientes(nome, tutor, telefone)')
       .order('id');
     if (error) {
       alertar('Erro ao carregar pacotes', error.message);
@@ -49,6 +61,7 @@ export default function PacotesScreen() {
         minimo_renovacao: r.minimo_renovacao,
         paciente_nome: r.pacientes?.nome ?? '',
         paciente_tutor: r.pacientes?.tutor ?? null,
+        paciente_telefone: r.pacientes?.telefone ?? null,
       }))
       .sort((a, b) => a.paciente_nome.localeCompare(b.paciente_nome));
     setPacotes(lista);
@@ -98,6 +111,17 @@ export default function PacotesScreen() {
     }
     if (editandoId === item.id) setSessoesUsadas('0');
     carregar();
+  }
+
+  function enviarMensagemRenovacao(item: Pacote) {
+    if (!item.paciente_telefone) {
+      alertar('Cadastre o telefone do tutor em Clientes para enviar a mensagem.');
+      return;
+    }
+    const restantes = Math.max(item.total_sessoes - item.sessoes_usadas, 0);
+    const numero = formatarNumeroWhatsApp(item.paciente_telefone);
+    const mensagem = montarMensagemRenovacao(item.paciente_nome, restantes);
+    Linking.openURL(`https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`);
   }
 
   function confirmarRemocao(item: Pacote) {
@@ -210,6 +234,10 @@ export default function PacotesScreen() {
                   </Text>
                 </View>
                 <View style={{ gap: 10, alignItems: 'flex-end' }}>
+                  <TouchableOpacity onPress={() => enviarMensagemRenovacao(item)} hitSlop={8} style={styles.linhaWhatsapp}>
+                    <Ionicons name="logo-whatsapp" size={14} color={theme.colors.success} />
+                    <Text style={styles.whatsapp}>Mensagem</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity onPress={() => renovar(item)} hitSlop={8}>
                     <Text style={styles.renovar}>Renovar</Text>
                   </TouchableOpacity>
@@ -289,6 +317,8 @@ const styles = StyleSheet.create({
   itemNome: { fontSize: 15, fontFamily: theme.font.medium, color: theme.colors.text },
   itemDetalhe: { fontSize: 12, fontFamily: theme.font.regular, color: theme.colors.textSecondary, marginTop: 2 },
   itemDetalheAlerta: { color: theme.colors.warning, fontFamily: theme.font.medium },
+  linhaWhatsapp: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  whatsapp: { color: theme.colors.success, fontFamily: theme.font.medium, fontSize: 13 },
   renovar: { color: theme.colors.primary, fontFamily: theme.font.medium, fontSize: 13 },
   remover: { color: theme.colors.danger, fontFamily: theme.font.medium, fontSize: 13 },
 });
