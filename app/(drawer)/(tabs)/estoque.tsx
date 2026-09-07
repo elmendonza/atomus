@@ -7,6 +7,7 @@ import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
+import { CATEGORIAS_ESTOQUE } from '@/src/utils/categoriasEstoque';
 
 type Produto = {
   id: string;
@@ -14,80 +15,16 @@ type Produto = {
   quantidade: number;
   unidade: string;
   estoque_minimo: number;
+  categoria: string | null;
 };
 
 const PRODUTOS_EXEMPLO = [
-  { nome: 'Agulhas', quantidade: 150, unidade: 'un', estoque_minimo: 30 },
-  { nome: 'Gases', quantidade: 40, unidade: 'pct', estoque_minimo: 15 },
-  { nome: 'Mocha', quantidade: 5, unidade: 'un', estoque_minimo: 10 },
+  { nome: 'Agulhas', quantidade: 150, unidade: 'un', estoque_minimo: 30, categoria: 'agulhas' },
+  { nome: 'Gases', quantidade: 40, unidade: 'pct', estoque_minimo: 15, categoria: 'descartaveis' },
+  { nome: 'Mocha', quantidade: 5, unidade: 'un', estoque_minimo: 10, categoria: 'moxa' },
 ];
 
-const REGEX_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
-
-function normalizar(texto: string) {
-  return texto.normalize('NFD').replace(REGEX_DIACRITICOS, '').toLowerCase().trim();
-}
-
-type Categoria = {
-  id: string;
-  label: string;
-  icone: keyof typeof Ionicons.glyphMap;
-  pertence: (nomeNormalizado: string) => boolean;
-};
-
-const CATEGORIAS: Categoria[] = [
-  {
-    id: 'geral',
-    label: 'Geral',
-    icone: 'grid-outline',
-    pertence: () => true,
-  },
-  {
-    id: 'agulhas',
-    label: 'Agulhas',
-    icone: 'medical-outline',
-    pertence: (n) => n.startsWith('agulha'),
-  },
-  {
-    id: 'descartaveis',
-    label: 'Descartáveis',
-    icone: 'bandage-outline',
-    pertence: (n) =>
-      n.startsWith('algodao') || n.startsWith('gaze') || n.startsWith('gases') || n.startsWith('luvas') || n.startsWith('sacos'),
-  },
-  {
-    id: 'moxa',
-    label: 'Moxa',
-    icone: 'flame-outline',
-    pertence: (n) => n.startsWith('moxa') || n === 'mocha',
-  },
-  {
-    id: 'pereciveis',
-    label: 'Perecíveis',
-    icone: 'flask-outline',
-    pertence: (n) =>
-      n.startsWith('solucao') ||
-      n.startsWith('nutrisco') ||
-      n.startsWith('nutricos') ||
-      n.startsWith('alcool') ||
-      n.startsWith('agua') ||
-      n.startsWith('clorexidina') ||
-      n.startsWith('ringer lactato') ||
-      n.startsWith('ringer'),
-  },
-  {
-    id: 'seringa',
-    label: 'Seringa',
-    icone: 'water-outline',
-    pertence: (n) => n.startsWith('seringa'),
-  },
-  {
-    id: 'sondas',
-    label: 'Sondas',
-    icone: 'git-commit-outline',
-    pertence: (n) => n.includes('sonda') || n.startsWith('scalp'),
-  },
-];
+const CATEGORIAS = [{ id: 'geral', label: 'Geral', icone: 'grid-outline' as const }, ...CATEGORIAS_ESTOQUE];
 
 function estoqueBaixo(p: Produto) {
   return p.quantidade <= p.estoque_minimo;
@@ -102,7 +39,7 @@ export default function EstoqueScreen() {
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
       .from('produtos_estoque')
-      .select('id, nome, quantidade, unidade, estoque_minimo')
+      .select('id, nome, quantidade, unidade, estoque_minimo, categoria')
       .order('nome');
     if (error) {
       alertar('Erro ao carregar estoque', error.message);
@@ -113,7 +50,7 @@ export default function EstoqueScreen() {
       const { data: novaLista, error: erroSeed } = await supabase
         .from('produtos_estoque')
         .insert(PRODUTOS_EXEMPLO)
-        .select('id, nome, quantidade, unidade, estoque_minimo');
+        .select('id, nome, quantidade, unidade, estoque_minimo, categoria');
       if (!erroSeed) {
         setProdutos((novaLista ?? []).sort((a, b) => a.nome.localeCompare(b.nome)));
         setCarregado(true);
@@ -132,16 +69,16 @@ export default function EstoqueScreen() {
   );
 
   const contagemPorCategoria = useMemo(() => {
-    const mapa: Record<string, number> = {};
-    for (const categoria of CATEGORIAS) {
-      mapa[categoria.id] = produtos.filter((p) => categoria.pertence(normalizar(p.nome))).length;
+    const mapa: Record<string, number> = { geral: produtos.length };
+    for (const categoria of CATEGORIAS_ESTOQUE) {
+      mapa[categoria.id] = produtos.filter((p) => p.categoria === categoria.id).length;
     }
     return mapa;
   }, [produtos]);
 
   const produtosFiltrados = useMemo(() => {
-    const categoria = CATEGORIAS.find((c) => c.id === categoriaAtiva) ?? CATEGORIAS[0];
-    return produtos.filter((p) => categoria.pertence(normalizar(p.nome)));
+    if (categoriaAtiva === 'geral') return produtos;
+    return produtos.filter((p) => p.categoria === categoriaAtiva);
   }, [produtos, categoriaAtiva]);
 
   const baixos = produtos.filter(estoqueBaixo).length;
