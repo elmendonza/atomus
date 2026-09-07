@@ -24,7 +24,14 @@ const PRODUTOS_EXEMPLO = [
   { nome: 'Mocha', quantidade: 5, unidade: 'un', estoque_minimo: 10, categoria: 'moxa' },
 ];
 
-const CATEGORIAS = [{ id: 'geral', label: 'Geral', icone: 'grid-outline' as const }, ...CATEGORIAS_ESTOQUE];
+const ID_ALERTA = 'alerta';
+const COR_ALERTA = '#F2B880'; // laranja pastel, sempre usar tons pastéis em elementos de destaque
+
+const CATEGORIAS = [
+  { id: 'geral', label: 'Geral', icone: 'grid-outline' as const },
+  { id: ID_ALERTA, label: 'Alerta', icone: 'alert-circle-outline' as const },
+  ...CATEGORIAS_ESTOQUE,
+];
 
 function estoqueBaixo(p: Produto) {
   return p.quantidade <= p.estoque_minimo;
@@ -69,7 +76,10 @@ export default function EstoqueScreen() {
   );
 
   const contagemPorCategoria = useMemo(() => {
-    const mapa: Record<string, number> = { geral: produtos.length };
+    const mapa: Record<string, number> = {
+      geral: produtos.length,
+      [ID_ALERTA]: produtos.filter(estoqueBaixo).length,
+    };
     for (const categoria of CATEGORIAS_ESTOQUE) {
       mapa[categoria.id] = produtos.filter((p) => p.categoria === categoria.id).length;
     }
@@ -78,6 +88,7 @@ export default function EstoqueScreen() {
 
   const produtosFiltrados = useMemo(() => {
     if (categoriaAtiva === 'geral') return produtos;
+    if (categoriaAtiva === ID_ALERTA) return produtos.filter(estoqueBaixo);
     return produtos.filter((p) => p.categoria === categoriaAtiva);
   }, [produtos, categoriaAtiva]);
 
@@ -102,20 +113,36 @@ export default function EstoqueScreen() {
       <View style={styles.categoriasGrid}>
         {CATEGORIAS.map((categoria) => {
           const ativa = categoria.id === categoriaAtiva;
+          const éAlerta = categoria.id === ID_ALERTA;
           return (
             <TouchableOpacity
               key={categoria.id}
-              style={[styles.categoriaCard, ativa && styles.categoriaCardAtiva]}
+              style={[
+                styles.categoriaCard,
+                ativa && styles.categoriaCardAtiva,
+                éAlerta && styles.categoriaCardAlerta,
+                éAlerta && ativa && styles.categoriaCardAlertaAtiva,
+              ]}
               activeOpacity={0.7}
               onPress={() => setCategoriaAtiva(categoria.id)}
             >
               <Ionicons
                 name={categoria.icone}
                 size={22}
-                color={ativa ? theme.colors.primary : theme.colors.textSecondary}
+                color={éAlerta ? COR_ALERTA : ativa ? theme.colors.primary : theme.colors.textSecondary}
               />
-              <Text style={[styles.categoriaLabel, ativa && styles.categoriaLabelAtiva]}>{categoria.label}</Text>
-              <Text style={styles.categoriaContagem}>{contagemPorCategoria[categoria.id] ?? 0}</Text>
+              <Text
+                style={[
+                  styles.categoriaLabel,
+                  ativa && styles.categoriaLabelAtiva,
+                  éAlerta && styles.categoriaLabelAlerta,
+                ]}
+              >
+                {categoria.label}
+              </Text>
+              <Text style={[styles.categoriaContagem, éAlerta && styles.categoriaContagemAlerta]}>
+                {contagemPorCategoria[categoria.id] ?? 0}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -208,6 +235,12 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary,
     backgroundColor: theme.colors.primaryLight,
   },
+  categoriaCardAlerta: {
+    borderColor: COR_ALERTA,
+  },
+  categoriaCardAlertaAtiva: {
+    backgroundColor: theme.colors.warningLight,
+  },
   categoriaLabel: {
     fontFamily: theme.font.medium,
     fontSize: 12,
@@ -215,11 +248,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   categoriaLabelAtiva: { color: theme.colors.primary },
+  categoriaLabelAlerta: { color: COR_ALERTA },
   categoriaContagem: {
     fontFamily: theme.font.regular,
     fontSize: 11,
     color: theme.colors.textTertiary,
   },
+  categoriaContagemAlerta: { color: COR_ALERTA },
   vazioContainer: { alignItems: 'center', paddingTop: theme.spacing.xl, gap: theme.spacing.xs },
   vazio: { fontFamily: theme.font.medium, fontSize: 15, color: theme.colors.textSecondary },
   vazioDica: { fontFamily: theme.font.regular, fontSize: 13, color: theme.colors.textTertiary },
