@@ -314,6 +314,63 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        <Text style={styles.secaoTitulo}>Financeiro por clínica · {nomeMesAtual}</Text>
+        {financeiroPorClinica.length === 0 ? (
+          <View style={styles.vazioContainer}>
+            <Ionicons name="business-outline" size={32} color={theme.colors.textTertiary} />
+            <Text style={styles.vazio}>Cadastre uma clínica para ver os números</Text>
+          </View>
+        ) : (
+          financeiroPorClinica.map(({ clinica, faturado, recebido, liquido, percentual, taxaMaquininha }) => (
+            <View key={clinica.id} style={styles.card}>
+              <View style={styles.clinicaHeaderLinha}>
+                <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
+                <Text style={styles.clinicaNomeTitulo}>{clinica.nome}</Text>
+                <Text style={styles.percentualBadge}>recebe {percentual}%</Text>
+              </View>
+              <View style={styles.metricasLinha}>
+                <View style={styles.metrica}>
+                  <Text style={styles.metricaLabel}>Faturado</Text>
+                  <Text style={styles.metricaValor}>{formatarMoeda(faturado)}</Text>
+                </View>
+                <View style={styles.metrica}>
+                  <Text style={[styles.metricaLabel, { color: theme.colors.success }]}>Recebido</Text>
+                  <Text style={[styles.metricaValor, { color: theme.colors.success }]}>{formatarMoeda(recebido)}</Text>
+                </View>
+                <View style={styles.metrica}>
+                  <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Líquido</Text>
+                  <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(liquido)}</Text>
+                </View>
+              </View>
+              {taxaMaquininha > 0 && (
+                <Text style={styles.taxaMaquininhaTexto}>
+                  Taxa maquininha ({TAXA_MAQUININHA_PARTICULAR}% cartão de crédito): -{formatarMoeda(taxaMaquininha)}
+                </Text>
+              )}
+            </View>
+          ))
+        )}
+
+        <Text style={styles.secaoTitulo}>Principais serviços por clínica</Text>
+        {servicosPorClinica.map(({ clinica, top }) => (
+          <View key={clinica.id} style={styles.card}>
+            <View style={styles.clinicaHeaderLinha}>
+              <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
+              <Text style={styles.clinicaNomeTitulo}>{clinica.nome}</Text>
+            </View>
+            {top.length === 0 ? (
+              <Text style={styles.clienteDetalhe}>Nenhum atendimento registrado</Text>
+            ) : (
+              top.map((servico, index) => (
+                <View key={servico.nome} style={[styles.linhaServico, index > 0 && styles.linhaComTopo]}>
+                  <Text style={styles.servicoNome}>{servico.nome}</Text>
+                  <Text style={styles.servicoDetalhe}>{servico.qtd}x · {formatarMoeda(servico.total)}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        ))}
+
         <Text style={styles.secaoTitulo}>Saídas por categoria · {nomeMesAtual}</Text>
         {despesasPorCategoria.length === 0 ? (
           <View style={styles.vazioContainer}>
@@ -426,63 +483,6 @@ export default function DashboardScreen() {
             ))}
           </View>
         )}
-
-        <Text style={styles.secaoTitulo}>Financeiro por clínica · {nomeMesAtual}</Text>
-        {financeiroPorClinica.length === 0 ? (
-          <View style={styles.vazioContainer}>
-            <Ionicons name="business-outline" size={32} color={theme.colors.textTertiary} />
-            <Text style={styles.vazio}>Cadastre uma clínica para ver os números</Text>
-          </View>
-        ) : (
-          financeiroPorClinica.map(({ clinica, faturado, recebido, liquido, percentual, taxaMaquininha }) => (
-            <View key={clinica.id} style={styles.card}>
-              <View style={styles.clinicaHeaderLinha}>
-                <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
-                <Text style={styles.clinicaNomeTitulo}>{clinica.nome}</Text>
-                <Text style={styles.percentualBadge}>recebe {percentual}%</Text>
-              </View>
-              <View style={styles.metricasLinha}>
-                <View style={styles.metrica}>
-                  <Text style={styles.metricaLabel}>Faturado</Text>
-                  <Text style={styles.metricaValor}>{formatarMoeda(faturado)}</Text>
-                </View>
-                <View style={styles.metrica}>
-                  <Text style={[styles.metricaLabel, { color: theme.colors.success }]}>Recebido</Text>
-                  <Text style={[styles.metricaValor, { color: theme.colors.success }]}>{formatarMoeda(recebido)}</Text>
-                </View>
-                <View style={styles.metrica}>
-                  <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Líquido</Text>
-                  <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(liquido)}</Text>
-                </View>
-              </View>
-              {taxaMaquininha > 0 && (
-                <Text style={styles.taxaMaquininhaTexto}>
-                  Taxa maquininha ({TAXA_MAQUININHA_PARTICULAR}% cartão de crédito): -{formatarMoeda(taxaMaquininha)}
-                </Text>
-              )}
-            </View>
-          ))
-        )}
-
-        <Text style={styles.secaoTitulo}>Principais serviços por clínica</Text>
-        {servicosPorClinica.map(({ clinica, top }) => (
-          <View key={clinica.id} style={styles.card}>
-            <View style={styles.clinicaHeaderLinha}>
-              <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
-              <Text style={styles.clinicaNomeTitulo}>{clinica.nome}</Text>
-            </View>
-            {top.length === 0 ? (
-              <Text style={styles.clienteDetalhe}>Nenhum atendimento registrado</Text>
-            ) : (
-              top.map((servico, index) => (
-                <View key={servico.nome} style={[styles.linhaServico, index > 0 && styles.linhaComTopo]}>
-                  <Text style={styles.servicoNome}>{servico.nome}</Text>
-                  <Text style={styles.servicoDetalhe}>{servico.qtd}x · {formatarMoeda(servico.total)}</Text>
-                </View>
-              ))
-            )}
-          </View>
-        ))}
       </ScrollView>
     </SafeAreaView>
   );
