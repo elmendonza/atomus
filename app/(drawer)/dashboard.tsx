@@ -255,8 +255,8 @@ export default function DashboardScreen() {
       const percentual = clinica.percentual ?? 100;
       const liquido = (recebido - taxaMaquininha) * (percentual / 100);
       const quantidadeAtendimentos = doMes.length;
-      const ticketMedio = quantidadeAtendimentos > 0 ? faturado / quantidadeAtendimentos : 0;
-      return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha, quantidadeAtendimentos, ticketMedio };
+      const ticketMedioLiquido = quantidadeAtendimentos > 0 ? liquido / quantidadeAtendimentos : 0;
+      return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha, quantidadeAtendimentos, ticketMedioLiquido };
     });
   }, [listaComParticular, atendimentos, mesSelecionado]);
 
@@ -381,14 +381,14 @@ export default function DashboardScreen() {
           ))
         )}
 
-        <Text style={styles.secaoTitulo}>Ticket médio por clínica</Text>
+        <Text style={styles.secaoTitulo}>Ticket médio líquido por clínica</Text>
         {financeiroPorClinica.length === 0 ? (
           <View style={styles.vazioContainer}>
             <Ionicons name="pricetag-outline" size={32} color={theme.colors.textTertiary} />
             <Text style={styles.vazio}>Cadastre uma clínica para ver os números</Text>
           </View>
         ) : (
-          financeiroPorClinica.map(({ clinica, quantidadeAtendimentos, ticketMedio }) => (
+          financeiroPorClinica.map(({ clinica, quantidadeAtendimentos, ticketMedioLiquido }) => (
             <View key={clinica.id} style={styles.card}>
               <View style={styles.clinicaHeaderLinha}>
                 <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
@@ -403,8 +403,8 @@ export default function DashboardScreen() {
                     <Text style={styles.metricaValor}>{quantidadeAtendimentos}</Text>
                   </View>
                   <View style={styles.metrica}>
-                    <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Ticket médio</Text>
-                    <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(ticketMedio)}</Text>
+                    <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Ticket médio líquido</Text>
+                    <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(ticketMedioLiquido)}</Text>
                   </View>
                 </View>
               )}
