@@ -113,15 +113,7 @@ export default function ModalAtendimento() {
             setHora(item.hora);
             setHoraFim(item.hora_fim);
             duracaoRef.current = Math.max(paraMinutos(item.hora_fim) - paraMinutos(item.hora), 5);
-            const procedimentoCarregado = item.procedimento || '';
-            setProcedimento(procedimentoCarregado);
-            if (['Acupuntura', 'Fisioterapia', 'Reabilitação'].includes(procedimentoCarregado)) {
-              setProcedimentoChip(procedimentoCarregado);
-              setProcedimentoOutro('');
-            } else {
-              setProcedimentoChip(procedimentoCarregado ? 'Outro' : '');
-              setProcedimentoOutro(procedimentoCarregado);
-            }
+            aplicarProcedimento(item.procedimento || '');
             setValor(item.valor ? String(item.valor).replace('.', ',') : '');
             setFormaPagamento(item.forma_pagamento || '');
             setStatus((item.status as any) || 'agendado');
@@ -183,6 +175,39 @@ export default function ModalAtendimento() {
     }
   }
 
+  function aplicarProcedimento(procedimentoCarregado: string) {
+    setProcedimento(procedimentoCarregado);
+    if (['Acupuntura', 'Fisioterapia', 'Reabilitação'].includes(procedimentoCarregado)) {
+      setProcedimentoChip(procedimentoCarregado);
+      setProcedimentoOutro('');
+    } else {
+      setProcedimentoChip(procedimentoCarregado ? 'Outro' : '');
+      setProcedimentoOutro(procedimentoCarregado);
+    }
+  }
+
+  async function aplicarUltimoAtendimento(pacienteId: string) {
+    const { data: ultimo } = await supabase
+      .from('atendimentos')
+      .select('clinica_id, procedimento, valor')
+      .eq('paciente_id', pacienteId)
+      .order('data', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!ultimo) return;
+    if (ultimo.clinica_id) {
+      setClinicaId(ultimo.clinica_id);
+      setModoParticular(false);
+    } else {
+      setClinicaId(null);
+      setModoParticular(true);
+    }
+    aplicarProcedimento(ultimo.procedimento || '');
+    if (ultimo.valor) {
+      setValor(String(ultimo.valor).replace('.', ','));
+    }
+  }
+
   function selecionarSugestao(item: PacienteSugestao) {
     setNomePaciente(item.nome);
     setPacienteVinculadoId(item.id);
@@ -191,6 +216,7 @@ export default function ModalAtendimento() {
     setEnderecoPaciente(item.endereco || '');
     setAtendidoEmResidencia(!!item.atendido_em_residencia);
     carregarPacote(item.id);
+    aplicarUltimoAtendimento(item.id);
     if (!formaPagamento && item.forma_pagamento_preferida) {
       setFormaPagamento(item.forma_pagamento_preferida);
     }
