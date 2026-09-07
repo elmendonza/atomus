@@ -254,8 +254,15 @@ export default function DashboardScreen() {
       const taxaMaquininha = clinica.id === ID_PARTICULAR ? recebidoCartaoCredito * (TAXA_MAQUININHA_PARTICULAR / 100) : 0;
       const percentual = clinica.percentual ?? 100;
       const liquido = (recebido - taxaMaquininha) * (percentual / 100);
+
+      // Ticket médio líquido: valor líquido médio por atendimento, independente de já ter sido pago ou não.
+      const faturadoCartaoCredito = doMes
+        .filter((a) => a.forma_pagamento === 'Cartão de crédito')
+        .reduce((soma, a) => soma + (a.valor || 0), 0);
+      const taxaMaquininhaFaturado = clinica.id === ID_PARTICULAR ? faturadoCartaoCredito * (TAXA_MAQUININHA_PARTICULAR / 100) : 0;
+      const faturadoLiquido = (faturado - taxaMaquininhaFaturado) * (percentual / 100);
       const quantidadeAtendimentos = doMes.length;
-      const ticketMedioLiquido = quantidadeAtendimentos > 0 ? liquido / quantidadeAtendimentos : 0;
+      const ticketMedioLiquido = quantidadeAtendimentos > 0 ? faturadoLiquido / quantidadeAtendimentos : 0;
       return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha, quantidadeAtendimentos, ticketMedioLiquido };
     });
   }, [listaComParticular, atendimentos, mesSelecionado]);
