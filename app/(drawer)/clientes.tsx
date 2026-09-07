@@ -26,11 +26,19 @@ const ORDENACAO_OPCOES = [
   { chave: 'za', rotulo: 'Z a A' },
   { chave: 'antigos', rotulo: 'Mais antigos' },
   { chave: 'recentes', rotulo: 'Mais recentes' },
+] as const;
+
+type Ordenacao = (typeof ORDENACAO_OPCOES)[number]['chave'];
+
+const FILTRO_STATUS_OPCOES = [
+  { chave: 'todos', rotulo: 'Todos' },
   { chave: 'pendentes', rotulo: 'Pendentes' },
   { chave: 'concluidos', rotulo: 'Concluídos' },
 ] as const;
 
-type Ordenacao = (typeof ORDENACAO_OPCOES)[number]['chave'];
+type FiltroStatus = (typeof FILTRO_STATUS_OPCOES)[number]['chave'];
+
+type Categoria = 'clinica' | 'ordenar' | 'filtro';
 
 function cadastroCompleto(p: Paciente) {
   return !!(p.forma_pagamento_preferida || p.dias_preferidos || p.horario_preferido);
@@ -43,6 +51,8 @@ export default function ClientesScreen() {
   const [busca, setBusca] = useState('');
   const [clinicaFiltro, setClinicaFiltro] = useState<string | null>(null);
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('az');
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>('todos');
+  const [categoriaAberta, setCategoriaAberta] = useState<Categoria | null>(null);
 
   const carregar = useCallback(async () => {
     const [{ data, error }, { data: cli }] = await Promise.all([
@@ -66,14 +76,31 @@ export default function ClientesScreen() {
     }, [carregar])
   );
 
+  function alternarCategoria(categoria: Categoria) {
+    setCategoriaAberta((atual) => (atual === categoria ? null : categoria));
+  }
+
+  const rotuloClinica =
+    clinicaFiltro === null
+      ? 'Todas'
+      : clinicaFiltro === 'particular'
+        ? 'Particular'
+        : clinicas.find((c) => c.id === clinicaFiltro)?.nome ?? 'Todas';
+  const rotuloOrdenacao = ORDENACAO_OPCOES.find((o) => o.chave === ordenacao)?.rotulo ?? 'A a Z';
+  const rotuloFiltro = FILTRO_STATUS_OPCOES.find((f) => f.chave === filtroStatus)?.rotulo ?? 'Todos';
+
   const filtrados = pacientes
     .filter((p) => {
       const termo = busca.trim().toLowerCase();
       const bateBusca = !termo || p.nome.toLowerCase().includes(termo) || (p.tutor || '').toLowerCase().includes(termo);
       if (!bateBusca) return false;
-      if (clinicaFiltro === null) return true;
-      if (clinicaFiltro === 'particular') return !p.clinica_id;
-      return p.clinica_id === clinicaFiltro;
+      if (clinicaFiltro === 'particular' ? !!p.clinica_id : clinicaFiltro !== null && p.clinica_id !== clinicaFiltro) {
+        return false;
+      }
+      const completo = cadastroCompleto(p);
+      if (filtroStatus === 'pendentes' && completo) return false;
+      if (filtroStatus === 'concluidos' && !completo) return false;
+      return true;
     })
     .sort((a, b) => {
       switch (ordenacao) {
@@ -85,10 +112,6 @@ export default function ClientesScreen() {
           return a.created_at.localeCompare(b.created_at);
         case 'recentes':
           return b.created_at.localeCompare(a.created_at);
-        case 'pendentes':
-          return Number(cadastroCompleto(a)) - Number(cadastroCompleto(b));
-        case 'concluidos':
-          return Number(cadastroCompleto(b)) - Number(cadastroCompleto(a));
         default:
           return 0;
       }
@@ -114,49 +137,108 @@ export default function ClientesScreen() {
         />
       </View>
 
-      <View style={styles.filtrosContainer}>
-        <Text style={styles.filtroLabel}>Clínica</Text>
-        <View style={styles.chipsContainer}>
-          <TouchableOpacity
-            style={[styles.filtroChip, clinicaFiltro === null && styles.filtroChipAtivo]}
-            onPress={() => setClinicaFiltro(null)}
-          >
-            <Text style={[styles.filtroChipTexto, clinicaFiltro === null && styles.filtroChipTextoAtivo]}>Todas</Text>
-          </TouchableOpacity>
-          {clinicas.map((c) => (
-            <TouchableOpacity
-              key={c.id}
-              style={[styles.filtroChip, { borderColor: c.cor }, clinicaFiltro === c.id && { backgroundColor: c.cor, borderColor: c.cor }]}
-              onPress={() => setClinicaFiltro(c.id)}
-            >
-              <Text style={[styles.filtroChipTexto, clinicaFiltro === c.id && styles.filtroChipTextoAtivo]}>{c.nome}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            style={[
-              styles.filtroChip,
-              { borderColor: COR_PARTICULAR },
-              clinicaFiltro === 'particular' && { backgroundColor: COR_PARTICULAR, borderColor: COR_PARTICULAR },
-            ]}
-            onPress={() => setClinicaFiltro('particular')}
-          >
-            <Text style={[styles.filtroChipTexto, clinicaFiltro === 'particular' && styles.filtroChipTextoAtivo]}>Particular</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={[styles.filtroLabel, { marginTop: 10 }]}>Ordenar por</Text>
-        <View style={styles.chipsContainer}>
-          {ORDENACAO_OPCOES.map((o) => (
-            <TouchableOpacity
-              key={o.chave}
-              style={[styles.filtroChip, ordenacao === o.chave && styles.filtroChipAtivo]}
-              onPress={() => setOrdenacao(o.chave)}
-            >
-              <Text style={[styles.filtroChipTexto, ordenacao === o.chave && styles.filtroChipTextoAtivo]}>{o.rotulo}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+      <View style={styles.categoriasContainer}>
+        <TouchableOpacity
+          style={[styles.categoriaBotao, categoriaAberta === 'clinica' && styles.categoriaBotaoAtivo]}
+          onPress={() => alternarCategoria('clinica')}
+        >
+          <Text style={styles.categoriaLabel}>Clínica: {rotuloClinica}</Text>
+          <Ionicons name={categoriaAberta === 'clinica' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.categoriaBotao, categoriaAberta === 'ordenar' && styles.categoriaBotaoAtivo]}
+          onPress={() => alternarCategoria('ordenar')}
+        >
+          <Text style={styles.categoriaLabel}>Ordenar: {rotuloOrdenacao}</Text>
+          <Ionicons name={categoriaAberta === 'ordenar' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.categoriaBotao, categoriaAberta === 'filtro' && styles.categoriaBotaoAtivo]}
+          onPress={() => alternarCategoria('filtro')}
+        >
+          <Text style={styles.categoriaLabel}>Filtro: {rotuloFiltro}</Text>
+          <Ionicons name={categoriaAberta === 'filtro' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
       </View>
+
+      {categoriaAberta === 'clinica' && (
+        <View style={styles.opcoesBox}>
+          <View style={styles.chipsContainer}>
+            <TouchableOpacity
+              style={[styles.opcaoChip, clinicaFiltro === null && styles.opcaoChipAtivo]}
+              onPress={() => {
+                setClinicaFiltro(null);
+                setCategoriaAberta(null);
+              }}
+            >
+              <Text style={[styles.opcaoChipTexto, clinicaFiltro === null && styles.opcaoChipTextoAtivo]}>Todas</Text>
+            </TouchableOpacity>
+            {clinicas.map((c) => (
+              <TouchableOpacity
+                key={c.id}
+                style={[styles.opcaoChip, { borderColor: c.cor }, clinicaFiltro === c.id && { backgroundColor: c.cor, borderColor: c.cor }]}
+                onPress={() => {
+                  setClinicaFiltro(c.id);
+                  setCategoriaAberta(null);
+                }}
+              >
+                <Text style={[styles.opcaoChipTexto, clinicaFiltro === c.id && styles.opcaoChipTextoAtivo]}>{c.nome}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[
+                styles.opcaoChip,
+                { borderColor: COR_PARTICULAR },
+                clinicaFiltro === 'particular' && { backgroundColor: COR_PARTICULAR, borderColor: COR_PARTICULAR },
+              ]}
+              onPress={() => {
+                setClinicaFiltro('particular');
+                setCategoriaAberta(null);
+              }}
+            >
+              <Text style={[styles.opcaoChipTexto, clinicaFiltro === 'particular' && styles.opcaoChipTextoAtivo]}>Particular</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {categoriaAberta === 'ordenar' && (
+        <View style={styles.opcoesBox}>
+          <View style={styles.chipsContainer}>
+            {ORDENACAO_OPCOES.map((o) => (
+              <TouchableOpacity
+                key={o.chave}
+                style={[styles.opcaoChip, ordenacao === o.chave && styles.opcaoChipAtivo]}
+                onPress={() => {
+                  setOrdenacao(o.chave);
+                  setCategoriaAberta(null);
+                }}
+              >
+                <Text style={[styles.opcaoChipTexto, ordenacao === o.chave && styles.opcaoChipTextoAtivo]}>{o.rotulo}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {categoriaAberta === 'filtro' && (
+        <View style={styles.opcoesBox}>
+          <View style={styles.chipsContainer}>
+            {FILTRO_STATUS_OPCOES.map((f) => (
+              <TouchableOpacity
+                key={f.chave}
+                style={[styles.opcaoChip, filtroStatus === f.chave && styles.opcaoChipAtivo]}
+                onPress={() => {
+                  setFiltroStatus(f.chave);
+                  setCategoriaAberta(null);
+                }}
+              >
+                <Text style={[styles.opcaoChipTexto, filtroStatus === f.chave && styles.opcaoChipTextoAtivo]}>{f.rotulo}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       {pendentes > 0 && (
         <Text style={styles.avisoPendentes}>
@@ -236,16 +318,41 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   buscaInput: { flex: 1, fontSize: 14, fontFamily: theme.font.regular, color: theme.colors.text },
-  filtrosContainer: { marginHorizontal: theme.spacing.md, marginTop: 12 },
-  filtroLabel: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.medium, marginBottom: 6 },
+  categoriasContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginHorizontal: theme.spacing.md,
+    marginTop: 12,
+  },
+  categoriaBotao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.full,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: theme.colors.surface,
+  },
+  categoriaBotaoAtivo: { borderColor: theme.colors.primary },
+  categoriaLabel: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 13 },
+  opcoesBox: {
+    marginHorizontal: theme.spacing.md,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filtroChip: {
+  opcaoChip: {
     borderWidth: 1.5, borderColor: theme.colors.border, borderRadius: theme.radius.full,
     paddingVertical: 6, paddingHorizontal: 12, backgroundColor: theme.colors.surface,
   },
-  filtroChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
-  filtroChipTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.medium, fontSize: 12 },
-  filtroChipTextoAtivo: { color: theme.colors.primary },
+  opcaoChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  opcaoChipTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.medium, fontSize: 12 },
+  opcaoChipTextoAtivo: { color: theme.colors.primary },
   avisoPendentes: {
     color: theme.colors.warning,
     fontSize: 12,
