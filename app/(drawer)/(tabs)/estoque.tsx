@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View, Text, FlatList, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -22,6 +22,73 @@ const PRODUTOS_EXEMPLO = [
   { nome: 'Mocha', quantidade: 5, unidade: 'un', estoque_minimo: 10 },
 ];
 
+const REGEX_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
+
+function normalizar(texto: string) {
+  return texto.normalize('NFD').replace(REGEX_DIACRITICOS, '').toLowerCase().trim();
+}
+
+type Categoria = {
+  id: string;
+  label: string;
+  icone: keyof typeof Ionicons.glyphMap;
+  pertence: (nomeNormalizado: string) => boolean;
+};
+
+const CATEGORIAS: Categoria[] = [
+  {
+    id: 'geral',
+    label: 'Geral',
+    icone: 'grid-outline',
+    pertence: () => true,
+  },
+  {
+    id: 'agulhas',
+    label: 'Agulhas',
+    icone: 'medical-outline',
+    pertence: (n) => n.startsWith('agulha'),
+  },
+  {
+    id: 'descartaveis',
+    label: 'Descartáveis',
+    icone: 'bandage-outline',
+    pertence: (n) =>
+      n.startsWith('algodao') || n.startsWith('gaze') || n.startsWith('gases') || n.startsWith('luvas') || n.startsWith('sacos'),
+  },
+  {
+    id: 'moxa',
+    label: 'Moxa',
+    icone: 'flame-outline',
+    pertence: (n) => n.startsWith('moxa') || n === 'mocha',
+  },
+  {
+    id: 'pereciveis',
+    label: 'Perecíveis',
+    icone: 'flask-outline',
+    pertence: (n) =>
+      n.startsWith('solucao') ||
+      n.startsWith('nutrisco') ||
+      n.startsWith('nutricos') ||
+      n.startsWith('alcool') ||
+      n.startsWith('agua') ||
+      n.startsWith('clorexidina') ||
+      n.startsWith('ringer lactato') ||
+      n.startsWith('ringer'),
+  },
+  {
+    id: 'seringa',
+    label: 'Seringa',
+    icone: 'water-outline',
+    pertence: (n) => n.startsWith('seringa'),
+  },
+  {
+    id: 'sondas',
+    label: 'Sondas',
+    icone: 'git-commit-outline',
+    pertence: (n) => n.includes('sonda') || n.startsWith('scalp'),
+  },
+];
+
 function estoqueBaixo(p: Produto) {
   return p.quantidade <= p.estoque_minimo;
 }
@@ -30,6 +97,7 @@ export default function EstoqueScreen() {
   const router = useRouter();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [carregado, setCarregado] = useState(false);
+  const [categoriaAtiva, setCategoriaAtiva] = useState('geral');
 
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
@@ -63,6 +131,19 @@ export default function EstoqueScreen() {
     }, [carregar])
   );
 
+  const contagemPorCategoria = useMemo(() => {
+    const mapa: Record<string, number> = {};
+    for (const categoria of CATEGORIAS) {
+      mapa[categoria.id] = produtos.filter((p) => categoria.pertence(normalizar(p.nome))).length;
+    }
+    return mapa;
+  }, [produtos]);
+
+  const produtosFiltrados = useMemo(() => {
+    const categoria = CATEGORIAS.find((c) => c.id === categoriaAtiva) ?? CATEGORIAS[0];
+    return produtos.filter((p) => categoria.pertence(normalizar(p.nome)));
+  }, [produtos, categoriaAtiva]);
+
   const baixos = produtos.filter(estoqueBaixo).length;
 
   return (
@@ -81,14 +162,36 @@ export default function EstoqueScreen() {
         </View>
       )}
 
+      <View style={styles.categoriasGrid}>
+        {CATEGORIAS.map((categoria) => {
+          const ativa = categoria.id === categoriaAtiva;
+          return (
+            <TouchableOpacity
+              key={categoria.id}
+              style={[styles.categoriaCard, ativa && styles.categoriaCardAtiva]}
+              activeOpacity={0.7}
+              onPress={() => setCategoriaAtiva(categoria.id)}
+            >
+              <Ionicons
+                name={categoria.icone}
+                size={22}
+                color={ativa ? theme.colors.primary : theme.colors.textSecondary}
+              />
+              <Text style={[styles.categoriaLabel, ativa && styles.categoriaLabelAtiva]}>{categoria.label}</Text>
+              <Text style={styles.categoriaContagem}>{contagemPorCategoria[categoria.id] ?? 0}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <FlatList
-        data={produtos}
+        data={produtosFiltrados}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingBottom: 110, paddingTop: theme.spacing.sm }}
         ListEmptyComponent={
           <View style={styles.vazioContainer}>
             <Ionicons name="cube-outline" size={40} color={theme.colors.textTertiary} />
-            <Text style={styles.vazio}>Nenhum produto cadastrado</Text>
+            <Text style={styles.vazio}>Nenhum produto nessa categoria</Text>
             <Text style={styles.vazioDica}>Toque no + para adicionar o primeiro produto</Text>
           </View>
         }
@@ -129,55 +232,88 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.sm,
-    paddingBottom: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    gap: theme.spacing.sm,
   },
-  headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  headerTitulo: { fontFamily: theme.font.bold, fontSize: 20, color: theme.colors.text },
   avisoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing.xs,
     marginHorizontal: theme.spacing.md,
-    marginTop: theme.spacing.sm,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
     backgroundColor: theme.colors.warningLight,
+    borderRadius: theme.radius.sm,
   },
-  avisoTexto: { color: theme.colors.warning, fontSize: 13, fontFamily: theme.font.medium },
-  vazioContainer: { alignItems: 'center', marginTop: 60, gap: 10, paddingHorizontal: 40 },
-  vazio: { color: theme.colors.textSecondary, fontSize: 14, fontFamily: theme.font.medium },
-  vazioDica: { color: theme.colors.textTertiary, fontSize: 12, fontFamily: theme.font.regular, textAlign: 'center' },
+  avisoTexto: { fontFamily: theme.font.medium, fontSize: 13, color: theme.colors.warning },
+  categoriasGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: theme.spacing.md,
+    paddingTop: theme.spacing.sm,
+    gap: theme.spacing.sm,
+  },
+  categoriaCard: {
+    width: '31%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    gap: 2,
+  },
+  categoriaCardAtiva: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  categoriaLabel: {
+    fontFamily: theme.font.medium,
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+  },
+  categoriaLabelAtiva: { color: theme.colors.primary },
+  categoriaContagem: {
+    fontFamily: theme.font.regular,
+    fontSize: 11,
+    color: theme.colors.textTertiary,
+  },
+  vazioContainer: { alignItems: 'center', paddingTop: theme.spacing.xl, gap: theme.spacing.xs },
+  vazio: { fontFamily: theme.font.medium, fontSize: 15, color: theme.colors.textSecondary },
+  vazioDica: { fontFamily: theme.font.regular, fontSize: 13, color: theme.colors.textTertiary },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
+    justifyContent: 'space-between',
     marginHorizontal: theme.spacing.md,
     marginBottom: theme.spacing.sm,
+    padding: theme.spacing.md,
     borderRadius: theme.radius.md,
     borderWidth: 1,
-    borderColor: theme.colors.divider,
-    padding: theme.spacing.md,
-    gap: 10,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
-  nome: { color: theme.colors.text, fontSize: 15, fontFamily: theme.font.medium },
-  detalhe: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.regular, marginTop: 2 },
+  nome: { fontFamily: theme.font.medium, fontSize: 15, color: theme.colors.text },
+  detalhe: { fontFamily: theme.font.regular, fontSize: 13, color: theme.colors.textSecondary, marginTop: 2 },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: theme.spacing.sm,
     paddingVertical: 4,
-    paddingHorizontal: 10,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.warningLight,
   },
-  badgeTexto: { fontSize: 11, fontFamily: theme.font.medium, color: theme.colors.warning },
+  badgeTexto: { fontFamily: theme.font.medium, fontSize: 11, color: theme.colors.warning },
   fab: {
     position: 'absolute',
-    right: 20,
-    bottom: 24,
+    right: theme.spacing.md,
+    bottom: theme.spacing.lg,
     width: 56,
     height: 56,
     borderRadius: theme.radius.full,
@@ -185,13 +321,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
-      ios: {
+      web: { boxShadow: '0 2px 8px rgba(0,0,0,0.25)' },
+      default: {
         shadowColor: '#000',
-        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
         shadowRadius: 8,
-        shadowOffset: { width: 0, height: 4 },
+        elevation: 4,
       },
-      android: { elevation: 4 },
     }),
   },
 });
