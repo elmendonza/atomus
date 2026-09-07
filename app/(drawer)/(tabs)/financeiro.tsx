@@ -77,6 +77,22 @@ function fimDoMes() {
 
 type Periodo = 'todos' | 'hoje' | 'semana' | 'mes' | 'personalizado';
 
+const PERIODO_OPCOES = [
+  { chave: 'todos', rotulo: 'Todo período' },
+  { chave: 'hoje', rotulo: 'Hoje' },
+  { chave: 'semana', rotulo: 'Esta semana' },
+  { chave: 'mes', rotulo: 'Este mês' },
+  { chave: 'personalizado', rotulo: 'Personalizado' },
+] as const;
+
+const STATUS_PAGAMENTO_OPCOES = [
+  { chave: 'todos', rotulo: 'Todos' },
+  { chave: 'pagos', rotulo: 'Pagos' },
+  { chave: 'pendentes', rotulo: 'Pendentes' },
+] as const;
+
+type CategoriaFiltro = 'periodo' | 'status' | 'clinica';
+
 export default function FinanceiroScreen() {
   const router = useRouter();
   const [aba, setAba] = useState<'entradas' | 'saidas'>('entradas');
@@ -88,6 +104,7 @@ export default function FinanceiroScreen() {
   const [periodo, setPeriodo] = useState<Periodo>('todos');
   const [dataInicio, setDataInicio] = useState(hoje());
   const [dataFim, setDataFim] = useState(hoje());
+  const [categoriaAberta, setCategoriaAberta] = useState<CategoriaFiltro | null>(null);
 
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [despesasCarregadas, setDespesasCarregadas] = useState(false);
@@ -207,6 +224,15 @@ export default function FinanceiroScreen() {
       .slice(0, 4);
   }, [despesas]);
 
+  function alternarCategoria(categoria: CategoriaFiltro) {
+    setCategoriaAberta((atual) => (atual === categoria ? null : categoria));
+  }
+
+  const listaClinicasComParticular = [...clinicas, { id: ID_PARTICULAR, nome: 'Particular', cor: COR_PARTICULAR }];
+  const rotuloPeriodo = PERIODO_OPCOES.find((p) => p.chave === periodo)?.rotulo ?? 'Todo período';
+  const rotuloStatus = STATUS_PAGAMENTO_OPCOES.find((s) => s.chave === filtroStatus)?.rotulo ?? 'Todos';
+  const rotuloClinica = filtroClinica === null ? 'Todas' : listaClinicasComParticular.find((c) => c.id === filtroClinica)?.nome ?? 'Todas';
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -248,19 +274,48 @@ export default function FinanceiroScreen() {
             </View>
           </View>
 
-          <View style={styles.filtrosStatusContainer}>
-            {(['todos', 'hoje', 'semana', 'mes', 'personalizado'] as const).map((p) => (
-              <TouchableOpacity
-                key={p}
-                style={[styles.filtroChip, periodo === p && styles.filtroChipAtivo]}
-                onPress={() => setPeriodo(p)}
-              >
-                <Text style={[styles.filtroChipTexto, periodo === p && styles.filtroChipTextoAtivo]}>
-                  {p === 'todos' ? 'Todo período' : p === 'hoje' ? 'Hoje' : p === 'semana' ? 'Esta semana' : p === 'mes' ? 'Este mês' : 'Personalizado'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.categoriasContainer}>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'periodo' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('periodo')}
+            >
+              <Text style={styles.categoriaLabel}>Período: {rotuloPeriodo}</Text>
+              <Ionicons name={categoriaAberta === 'periodo' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'status' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('status')}
+            >
+              <Text style={styles.categoriaLabel}>Status pagamento: {rotuloStatus}</Text>
+              <Ionicons name={categoriaAberta === 'status' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'clinica' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('clinica')}
+            >
+              <Text style={styles.categoriaLabel}>Clínica: {rotuloClinica}</Text>
+              <Ionicons name={categoriaAberta === 'clinica' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
           </View>
+
+          {categoriaAberta === 'periodo' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                {PERIODO_OPCOES.map((p) => (
+                  <TouchableOpacity
+                    key={p.chave}
+                    style={[styles.opcaoChip, periodo === p.chave && styles.opcaoChipAtivo]}
+                    onPress={() => {
+                      setPeriodo(p.chave);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, periodo === p.chave && styles.opcaoChipTextoAtivo]}>{p.rotulo}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           {periodo === 'personalizado' && (
             <View style={styles.periodoPersonalizadoContainer}>
@@ -287,48 +342,56 @@ export default function FinanceiroScreen() {
             </View>
           )}
 
-          <View style={styles.filtrosStatusContainer}>
-            {(['todos', 'pagos', 'pendentes'] as const).map((f) => (
-              <TouchableOpacity
-                key={f}
-                style={[styles.filtroChip, filtroStatus === f && styles.filtroChipAtivo]}
-                onPress={() => setFiltroStatus(f)}
-              >
-                <Text style={[styles.filtroChipTexto, filtroStatus === f && styles.filtroChipTextoAtivo]}>
-                  {f === 'todos' ? 'Todos' : f === 'pagos' ? 'Pagos' : 'Pendentes'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {categoriaAberta === 'status' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                {STATUS_PAGAMENTO_OPCOES.map((s) => (
+                  <TouchableOpacity
+                    key={s.chave}
+                    style={[styles.opcaoChip, filtroStatus === s.chave && styles.opcaoChipAtivo]}
+                    onPress={() => {
+                      setFiltroStatus(s.chave);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, filtroStatus === s.chave && styles.opcaoChipTextoAtivo]}>{s.rotulo}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={[...clinicas, { id: ID_PARTICULAR, nome: 'Particular', cor: COR_PARTICULAR }]}
-            keyExtractor={(item) => String(item.id)}
-            style={styles.filtrosClinicaLista}
-            contentContainerStyle={{ paddingHorizontal: theme.spacing.md, gap: 8 }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.clinicaChip,
-                  { borderColor: item.cor },
-                  filtroClinica === item.id && { backgroundColor: item.cor },
-                ]}
-                onPress={() => setFiltroClinica(filtroClinica === item.id ? null : item.id)}
-              >
-                <View style={[styles.clinicaChipPonto, { backgroundColor: item.cor }]} />
-                <Text
-                  style={[
-                    styles.clinicaChipTexto,
-                    filtroClinica === item.id && styles.clinicaChipTextoAtivo,
-                  ]}
+          {categoriaAberta === 'clinica' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                <TouchableOpacity
+                  style={[styles.opcaoChip, filtroClinica === null && styles.opcaoChipAtivo]}
+                  onPress={() => {
+                    setFiltroClinica(null);
+                    setCategoriaAberta(null);
+                  }}
                 >
-                  {item.nome}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
+                  <Text style={[styles.opcaoChipTexto, filtroClinica === null && styles.opcaoChipTextoAtivo]}>Todas</Text>
+                </TouchableOpacity>
+                {listaClinicasComParticular.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.opcaoChip,
+                      { borderColor: item.cor },
+                      filtroClinica === item.id && { backgroundColor: item.cor, borderColor: item.cor },
+                    ]}
+                    onPress={() => {
+                      setFiltroClinica(item.id);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, filtroClinica === item.id && styles.opcaoChipTextoAtivo]}>{item.nome}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           <FlatList
             data={filtrados}
@@ -499,24 +562,45 @@ const styles = StyleSheet.create({
   principaisLinha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
   principaisCategoria: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.regular },
   principaisValor: { color: theme.colors.text, fontSize: 13, fontFamily: theme.font.medium },
-  filtrosStatusContainer: {
+  categoriasContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: theme.spacing.md,
     gap: 8,
+    paddingHorizontal: theme.spacing.md,
     marginBottom: theme.spacing.sm,
   },
-  filtroChip: {
+  categoriaBotao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.full,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: theme.colors.surface,
+  },
+  categoriaBotaoAtivo: { borderColor: theme.colors.primary },
+  categoriaLabel: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 13 },
+  opcoesBox: {
+    marginHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    padding: 10,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  opcaoChip: {
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.surface,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: theme.colors.border,
   },
-  filtroChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
-  filtroChipTexto: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.medium },
-  filtroChipTextoAtivo: { color: theme.colors.primary },
+  opcaoChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  opcaoChipTexto: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.medium },
+  opcaoChipTextoAtivo: { color: theme.colors.primary },
   periodoPersonalizadoContainer: {
     flexDirection: 'row',
     paddingHorizontal: theme.spacing.md,
@@ -535,20 +619,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     backgroundColor: theme.colors.surface,
   },
-  filtrosClinicaLista: { marginBottom: theme.spacing.sm, flexGrow: 0 },
-  clinicaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.full,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-  },
-  clinicaChipPonto: { width: 8, height: 8, borderRadius: 4 },
-  clinicaChipTexto: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.medium },
-  clinicaChipTextoAtivo: { color: '#fff' },
   vazioContainer: { alignItems: 'center', marginTop: 60, gap: 10 },
   vazio: { color: theme.colors.textSecondary, fontSize: 14, fontFamily: theme.font.medium },
   card: {
