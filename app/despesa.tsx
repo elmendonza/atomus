@@ -16,7 +16,6 @@ const CATEGORIAS = [
   { valor: 'investimento', label: 'Investimento em materiais' },
   { valor: 'curso', label: 'Cursos e especializações' },
   { valor: 'operacional', label: 'Custo operacional' },
-  { valor: 'outro', label: 'Outro' },
 ] as const;
 
 const FORMAS_PAGAMENTO = ['Pix', 'Cartão', 'Dinheiro', 'Boleto'];

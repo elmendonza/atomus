@@ -46,7 +46,6 @@ const CATEGORIAS_DESPESA: Record<string, string> = {
   investimento: 'Investimento em materiais',
   curso: 'Cursos e especializações',
   operacional: 'Custo operacional',
-  outro: 'Outro',
 };
 
 const DESPESAS_EXEMPLO = [
