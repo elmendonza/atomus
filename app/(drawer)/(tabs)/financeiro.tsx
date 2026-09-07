@@ -1,12 +1,13 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, TextInput, Platform } from 'react-native';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
+import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
-import { hoje, dateParaIso } from '@/src/utils/tempo';
+import { hoje, dateParaIso, isoParaDate, formatarDataBR } from '@/src/utils/tempo';
 import { formatarMoeda } from '@/src/utils/formato';
 import { alertar } from '@/src/utils/alerta';
 
@@ -91,7 +92,9 @@ const STATUS_PAGAMENTO_OPCOES = [
   { chave: 'pendentes', rotulo: 'Pendentes' },
 ] as const;
 
-type CategoriaFiltro = 'periodo' | 'status' | 'clinica';
+const FORMAS_PAGAMENTO_DESPESA = ['Pix', 'Cartão', 'Dinheiro', 'Boleto'];
+
+type CategoriaFiltro = 'periodo' | 'status' | 'clinica' | 'categoriaDespesa' | 'pagamentoDespesa';
 
 export default function FinanceiroScreen() {
   const router = useRouter();
@@ -108,6 +111,11 @@ export default function FinanceiroScreen() {
 
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [despesasCarregadas, setDespesasCarregadas] = useState(false);
+  const [periodoSaidas, setPeriodoSaidas] = useState<Periodo>('todos');
+  const [dataInicioSaidas, setDataInicioSaidas] = useState(hoje());
+  const [dataFimSaidas, setDataFimSaidas] = useState(hoje());
+  const [filtroCategoriaDespesa, setFiltroCategoriaDespesa] = useState<string | null>(null);
+  const [filtroFormaPagamentoDespesa, setFiltroFormaPagamentoDespesa] = useState<string | null>(null);
 
   const carregarEntradas = useCallback(async () => {
     const { data: cli } = await supabase.from('clinicas').select('id, nome, cor').order('nome');
@@ -205,24 +213,36 @@ export default function FinanceiroScreen() {
   const totalPago = filtrados.filter((i) => i.pago).reduce((soma, item) => soma + (item.valor || 0), 0);
   const totalPendente = totalGeral - totalPago;
 
-  const inicioMes = inicioDoMes();
-  const fimMes = fimDoMes();
-  const totalMesDespesas = despesas
-    .filter((d) => d.data_compra >= inicioMes && d.data_compra <= fimMes)
-    .reduce((soma, d) => soma + (d.valor_total || 0), 0);
   const totalHojeDespesas = despesas
     .filter((d) => d.data_compra === hoje())
     .reduce((soma, d) => soma + (d.valor_total || 0), 0);
 
+  const intervaloDataSaidas = useMemo(() => {
+    if (periodoSaidas === 'hoje') return { inicio: hoje(), fim: hoje() };
+    if (periodoSaidas === 'semana') return { inicio: inicioDaSemana(), fim: hoje() };
+    if (periodoSaidas === 'mes') return { inicio: inicioDoMes(), fim: fimDoMes() };
+    if (periodoSaidas === 'personalizado') return { inicio: dataInicioSaidas, fim: dataFimSaidas };
+    return null;
+  }, [periodoSaidas, dataInicioSaidas, dataFimSaidas]);
+
+  const despesasFiltradas = despesas.filter((d) => {
+    if (filtroCategoriaDespesa !== null && d.categoria !== filtroCategoriaDespesa) return false;
+    if (filtroFormaPagamentoDespesa !== null && d.forma_pagamento !== filtroFormaPagamentoDespesa) return false;
+    if (intervaloDataSaidas && (d.data_compra < intervaloDataSaidas.inicio || d.data_compra > intervaloDataSaidas.fim)) return false;
+    return true;
+  });
+
+  const totalFiltradoDespesas = despesasFiltradas.reduce((soma, d) => soma + (d.valor_total || 0), 0);
+
   const principaisGastos = useMemo(() => {
     const porCategoria: Record<string, number> = {};
-    despesas.forEach((d) => {
+    despesasFiltradas.forEach((d) => {
       porCategoria[d.categoria] = (porCategoria[d.categoria] || 0) + (d.valor_total || 0);
     });
     return Object.entries(porCategoria)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
-  }, [despesas]);
+  }, [despesasFiltradas]);
 
   function alternarCategoria(categoria: CategoriaFiltro) {
     setCategoriaAberta((atual) => (atual === categoria ? null : categoria));
@@ -232,6 +252,9 @@ export default function FinanceiroScreen() {
   const rotuloPeriodo = PERIODO_OPCOES.find((p) => p.chave === periodo)?.rotulo ?? 'Todo período';
   const rotuloStatus = STATUS_PAGAMENTO_OPCOES.find((s) => s.chave === filtroStatus)?.rotulo ?? 'Todos';
   const rotuloClinica = filtroClinica === null ? 'Todas' : listaClinicasComParticular.find((c) => c.id === filtroClinica)?.nome ?? 'Todas';
+  const rotuloPeriodoSaidas = PERIODO_OPCOES.find((p) => p.chave === periodoSaidas)?.rotulo ?? 'Todo período';
+  const rotuloCategoriaDespesa = filtroCategoriaDespesa === null ? 'Todas' : CATEGORIAS_DESPESA[filtroCategoriaDespesa] ?? filtroCategoriaDespesa;
+  const rotuloFormaPagamentoDespesa = filtroFormaPagamentoDespesa ?? 'Todas';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -321,22 +344,22 @@ export default function FinanceiroScreen() {
             <View style={styles.periodoPersonalizadoContainer}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.periodoLabel}>De</Text>
-                <TextInput
-                  style={styles.periodoInput}
-                  placeholder="AAAA-MM-DD"
-                  placeholderTextColor={theme.colors.textTertiary}
-                  value={dataInicio}
-                  onChangeText={setDataInicio}
+                <CampoDataHora
+                  valor={isoParaDate(dataInicio)}
+                  modo="date"
+                  aoAlterar={(d) => setDataInicio(dateParaIso(d))}
+                  textoExibido={formatarDataBR(dataInicio)}
+                  icone="calendar-outline"
                 />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.periodoLabel}>Até</Text>
-                <TextInput
-                  style={styles.periodoInput}
-                  placeholder="AAAA-MM-DD"
-                  placeholderTextColor={theme.colors.textTertiary}
-                  value={dataFim}
-                  onChangeText={setDataFim}
+                <CampoDataHora
+                  valor={isoParaDate(dataFim)}
+                  modo="date"
+                  aoAlterar={(d) => setDataFim(dateParaIso(d))}
+                  textoExibido={formatarDataBR(dataFim)}
+                  icone="calendar-outline"
                 />
               </View>
             </View>
@@ -441,14 +464,138 @@ export default function FinanceiroScreen() {
         <>
           <View style={styles.resumoContainer}>
             <View style={styles.resumoCard}>
-              <Text style={[styles.resumoLabel, { color: theme.colors.danger }]}>Gasto no mês</Text>
-              <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{formatarMoeda(totalMesDespesas)}</Text>
+              <Text style={[styles.resumoLabel, { color: theme.colors.danger }]}>Total</Text>
+              <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{formatarMoeda(totalFiltradoDespesas)}</Text>
             </View>
             <View style={styles.resumoCard}>
               <Text style={styles.resumoLabel}>Gasto hoje</Text>
               <Text style={styles.resumoValor}>{formatarMoeda(totalHojeDespesas)}</Text>
             </View>
           </View>
+
+          <View style={styles.categoriasContainer}>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'periodo' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('periodo')}
+            >
+              <Text style={styles.categoriaLabel}>Período: {rotuloPeriodoSaidas}</Text>
+              <Ionicons name={categoriaAberta === 'periodo' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'categoriaDespesa' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('categoriaDespesa')}
+            >
+              <Text style={styles.categoriaLabel}>Categoria: {rotuloCategoriaDespesa}</Text>
+              <Ionicons name={categoriaAberta === 'categoriaDespesa' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.categoriaBotao, categoriaAberta === 'pagamentoDespesa' && styles.categoriaBotaoAtivo]}
+              onPress={() => alternarCategoria('pagamentoDespesa')}
+            >
+              <Text style={styles.categoriaLabel}>Forma de pagamento: {rotuloFormaPagamentoDespesa}</Text>
+              <Ionicons name={categoriaAberta === 'pagamentoDespesa' ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          {categoriaAberta === 'periodo' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                {PERIODO_OPCOES.map((p) => (
+                  <TouchableOpacity
+                    key={p.chave}
+                    style={[styles.opcaoChip, periodoSaidas === p.chave && styles.opcaoChipAtivo]}
+                    onPress={() => {
+                      setPeriodoSaidas(p.chave);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, periodoSaidas === p.chave && styles.opcaoChipTextoAtivo]}>{p.rotulo}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {periodoSaidas === 'personalizado' && (
+            <View style={styles.periodoPersonalizadoContainer}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.periodoLabel}>De</Text>
+                <CampoDataHora
+                  valor={isoParaDate(dataInicioSaidas)}
+                  modo="date"
+                  aoAlterar={(d) => setDataInicioSaidas(dateParaIso(d))}
+                  textoExibido={formatarDataBR(dataInicioSaidas)}
+                  icone="calendar-outline"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.periodoLabel}>Até</Text>
+                <CampoDataHora
+                  valor={isoParaDate(dataFimSaidas)}
+                  modo="date"
+                  aoAlterar={(d) => setDataFimSaidas(dateParaIso(d))}
+                  textoExibido={formatarDataBR(dataFimSaidas)}
+                  icone="calendar-outline"
+                />
+              </View>
+            </View>
+          )}
+
+          {categoriaAberta === 'categoriaDespesa' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                <TouchableOpacity
+                  style={[styles.opcaoChip, filtroCategoriaDespesa === null && styles.opcaoChipAtivo]}
+                  onPress={() => {
+                    setFiltroCategoriaDespesa(null);
+                    setCategoriaAberta(null);
+                  }}
+                >
+                  <Text style={[styles.opcaoChipTexto, filtroCategoriaDespesa === null && styles.opcaoChipTextoAtivo]}>Todas</Text>
+                </TouchableOpacity>
+                {Object.entries(CATEGORIAS_DESPESA).map(([valor, label]) => (
+                  <TouchableOpacity
+                    key={valor}
+                    style={[styles.opcaoChip, filtroCategoriaDespesa === valor && styles.opcaoChipAtivo]}
+                    onPress={() => {
+                      setFiltroCategoriaDespesa(valor);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, filtroCategoriaDespesa === valor && styles.opcaoChipTextoAtivo]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {categoriaAberta === 'pagamentoDespesa' && (
+            <View style={styles.opcoesBox}>
+              <View style={styles.chipsContainer}>
+                <TouchableOpacity
+                  style={[styles.opcaoChip, filtroFormaPagamentoDespesa === null && styles.opcaoChipAtivo]}
+                  onPress={() => {
+                    setFiltroFormaPagamentoDespesa(null);
+                    setCategoriaAberta(null);
+                  }}
+                >
+                  <Text style={[styles.opcaoChipTexto, filtroFormaPagamentoDespesa === null && styles.opcaoChipTextoAtivo]}>Todas</Text>
+                </TouchableOpacity>
+                {FORMAS_PAGAMENTO_DESPESA.map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[styles.opcaoChip, filtroFormaPagamentoDespesa === f && styles.opcaoChipAtivo]}
+                    onPress={() => {
+                      setFiltroFormaPagamentoDespesa(f);
+                      setCategoriaAberta(null);
+                    }}
+                  >
+                    <Text style={[styles.opcaoChipTexto, filtroFormaPagamentoDespesa === f && styles.opcaoChipTextoAtivo]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           {principaisGastos.length > 0 && (
             <View style={styles.principaisContainer}>
@@ -463,7 +610,7 @@ export default function FinanceiroScreen() {
           )}
 
           <FlatList
-            data={despesas}
+            data={despesasFiltradas}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ paddingBottom: 110, paddingTop: 8 }}
             ListEmptyComponent={
@@ -608,17 +755,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
   },
   periodoLabel: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.regular, marginBottom: 4 },
-  periodoInput: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    fontSize: 13,
-    fontFamily: theme.font.regular,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
-  },
   vazioContainer: { alignItems: 'center', marginTop: 60, gap: 10 },
   vazio: { color: theme.colors.textSecondary, fontSize: 14, fontFamily: theme.font.medium },
   card: {
