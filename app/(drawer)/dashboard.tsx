@@ -254,7 +254,9 @@ export default function DashboardScreen() {
       const taxaMaquininha = clinica.id === ID_PARTICULAR ? recebidoCartaoCredito * (TAXA_MAQUININHA_PARTICULAR / 100) : 0;
       const percentual = clinica.percentual ?? 100;
       const liquido = (recebido - taxaMaquininha) * (percentual / 100);
-      return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha };
+      const quantidadeAtendimentos = doMes.length;
+      const ticketMedio = quantidadeAtendimentos > 0 ? faturado / quantidadeAtendimentos : 0;
+      return { clinica, faturado, recebido, liquido, percentual, taxaMaquininha, quantidadeAtendimentos, ticketMedio };
     });
   }, [listaComParticular, atendimentos, mesSelecionado]);
 
@@ -374,6 +376,37 @@ export default function DashboardScreen() {
                 <Text style={styles.taxaMaquininhaTexto}>
                   Taxa maquininha ({TAXA_MAQUININHA_PARTICULAR}% cartão de crédito): -{formatarMoeda(taxaMaquininha)}
                 </Text>
+              )}
+            </View>
+          ))
+        )}
+
+        <Text style={styles.secaoTitulo}>Ticket médio por clínica</Text>
+        {financeiroPorClinica.length === 0 ? (
+          <View style={styles.vazioContainer}>
+            <Ionicons name="pricetag-outline" size={32} color={theme.colors.textTertiary} />
+            <Text style={styles.vazio}>Cadastre uma clínica para ver os números</Text>
+          </View>
+        ) : (
+          financeiroPorClinica.map(({ clinica, quantidadeAtendimentos, ticketMedio }) => (
+            <View key={clinica.id} style={styles.card}>
+              <View style={styles.clinicaHeaderLinha}>
+                <View style={[styles.pontoClinica, { backgroundColor: clinica.cor }]} />
+                <Text style={styles.clinicaNomeTitulo}>{clinica.nome}</Text>
+              </View>
+              {quantidadeAtendimentos === 0 ? (
+                <Text style={styles.clienteDetalhe}>Nenhum atendimento neste mês</Text>
+              ) : (
+                <View style={styles.metricasLinha}>
+                  <View style={styles.metrica}>
+                    <Text style={styles.metricaLabel}>Atendimentos</Text>
+                    <Text style={styles.metricaValor}>{quantidadeAtendimentos}</Text>
+                  </View>
+                  <View style={styles.metrica}>
+                    <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Ticket médio</Text>
+                    <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(ticketMedio)}</Text>
+                  </View>
+                </View>
               )}
             </View>
           ))
