@@ -136,79 +136,91 @@ const EventoBloco = memo(function EventoBloco({
   const alturaExtra = useSharedValue(0);
   const emDestaque = useSharedValue(0);
 
-  function finalizarMover(deltaX: number, deltaY: number) {
-    const distancia = Math.hypot(deltaX, deltaY);
-    if (distancia < DISTANCIA_MINIMA_ARRASTO) return;
-    if (!onMoverEvento || alturaHora === 0) return;
-    const minutosPorPixel = 60 / alturaHora;
-    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
-    const novoInicioMin = Math.max(0, Math.min(1440 - duracaoMin, inicioMin + deltaMinutos));
-    const novoFimMin = novoInicioMin + duracaoMin;
-    const deltaColunas = larguraColuna > 0 ? Math.round(deltaX / larguraColuna) : 0;
-    const novoIndiceDia = Math.max(0, Math.min(diasIso.length - 1, indiceDia + deltaColunas));
-    onMoverEvento(ev.id, diasIso[novoIndiceDia], formatarMinutos(novoInicioMin), formatarMinutos(novoFimMin));
-  }
+  const finalizarMover = useCallback(
+    (deltaX: number, deltaY: number) => {
+      const distancia = Math.hypot(deltaX, deltaY);
+      if (distancia < DISTANCIA_MINIMA_ARRASTO) return;
+      if (!onMoverEvento || alturaHora === 0) return;
+      const minutosPorPixel = 60 / alturaHora;
+      const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+      const novoInicioMin = Math.max(0, Math.min(1440 - duracaoMin, inicioMin + deltaMinutos));
+      const novoFimMin = novoInicioMin + duracaoMin;
+      const deltaColunas = larguraColuna > 0 ? Math.round(deltaX / larguraColuna) : 0;
+      const novoIndiceDia = Math.max(0, Math.min(diasIso.length - 1, indiceDia + deltaColunas));
+      onMoverEvento(ev.id, diasIso[novoIndiceDia], formatarMinutos(novoInicioMin), formatarMinutos(novoFimMin));
+    },
+    [onMoverEvento, alturaHora, duracaoMin, inicioMin, larguraColuna, diasIso, indiceDia, ev.id]
+  );
 
-  function finalizarRedimensionar(deltaY: number) {
-    if (!onMoverEvento || alturaHora === 0) return;
-    const minutosPorPixel = 60 / alturaHora;
-    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
-    const novoFimMin = Math.max(inicioMin + 15, fimMin + deltaMinutos);
-    onMoverEvento(ev.id, diasIso[indiceDia], ev.hora, formatarMinutos(novoFimMin));
-  }
+  const finalizarRedimensionar = useCallback(
+    (deltaY: number) => {
+      if (!onMoverEvento || alturaHora === 0) return;
+      const minutosPorPixel = 60 / alturaHora;
+      const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+      const novoFimMin = Math.max(inicioMin + 15, fimMin + deltaMinutos);
+      onMoverEvento(ev.id, diasIso[indiceDia], ev.hora, formatarMinutos(novoFimMin));
+    },
+    [onMoverEvento, alturaHora, inicioMin, fimMin, diasIso, indiceDia, ev.id, ev.hora]
+  );
 
-  const gestoToque = Gesture.Tap()
-    .maxDuration(ESPERA_PARA_LIBERAR_ARRASTO_MS - 100)
-    .maxDistance(DISTANCIA_MINIMA_ARRASTO)
-    .onEnd(() => {
-      runOnJS(onPressEvento)(ev.id);
-    });
+  const gestoMover = useMemo(() => {
+    const gestoToque = Gesture.Tap()
+      .maxDuration(ESPERA_PARA_LIBERAR_ARRASTO_MS - 100)
+      .maxDistance(DISTANCIA_MINIMA_ARRASTO)
+      .onEnd(() => {
+        runOnJS(onPressEvento)(ev.id);
+      });
 
-  const gestoArrastar = Gesture.Pan()
-    .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
-    .onBegin(() => {
-      emDestaque.value = 1;
-      runOnJS(onTocarInicio)();
-    })
-    .onStart(() => {
-      runOnJS(vibrarLiberacao)();
-    })
-    .onUpdate((e) => {
-      translateX.value = e.translationX;
-      translateY.value = e.translationY;
-    })
-    .onEnd((e) => {
-      runOnJS(finalizarMover)(e.translationX, e.translationY);
-      translateX.value = withTiming(0, { duration: 150 });
-      translateY.value = withTiming(0, { duration: 150 });
-    })
-    .onFinalize(() => {
-      emDestaque.value = 0;
-      runOnJS(onTocarFim)();
-    });
+    const gestoArrastar = Gesture.Pan()
+      .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
+      .onBegin(() => {
+        emDestaque.value = 1;
+        runOnJS(onTocarInicio)();
+      })
+      .onStart(() => {
+        runOnJS(vibrarLiberacao)();
+      })
+      .onUpdate((e) => {
+        translateX.value = e.translationX;
+        translateY.value = e.translationY;
+      })
+      .onEnd((e) => {
+        runOnJS(finalizarMover)(e.translationX, e.translationY);
+        translateX.value = withTiming(0, { duration: 150 });
+        translateY.value = withTiming(0, { duration: 150 });
+      })
+      .onFinalize(() => {
+        emDestaque.value = 0;
+        runOnJS(onTocarFim)();
+      });
 
-  const gestoMover = Gesture.Race(gestoToque, gestoArrastar);
+    return Gesture.Race(gestoToque, gestoArrastar);
+  }, [ev.id, onPressEvento, onTocarInicio, onTocarFim, finalizarMover, emDestaque, translateX, translateY]);
 
-  const gestoRedimensionar = Gesture.Pan()
-    .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
-    .onBegin(() => {
-      emDestaque.value = 1;
-      runOnJS(onTocarInicio)();
-    })
-    .onStart(() => {
-      runOnJS(vibrarLiberacao)();
-    })
-    .onUpdate((e) => {
-      alturaExtra.value = e.translationY;
-    })
-    .onEnd((e) => {
-      runOnJS(finalizarRedimensionar)(e.translationY);
-      alturaExtra.value = withTiming(0, { duration: 150 });
-    })
-    .onFinalize(() => {
-      emDestaque.value = 0;
-      runOnJS(onTocarFim)();
-    });
+  const gestoRedimensionar = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
+        .onBegin(() => {
+          emDestaque.value = 1;
+          runOnJS(onTocarInicio)();
+        })
+        .onStart(() => {
+          runOnJS(vibrarLiberacao)();
+        })
+        .onUpdate((e) => {
+          alturaExtra.value = e.translationY;
+        })
+        .onEnd((e) => {
+          runOnJS(finalizarRedimensionar)(e.translationY);
+          alturaExtra.value = withTiming(0, { duration: 150 });
+        })
+        .onFinalize(() => {
+          emDestaque.value = 0;
+          runOnJS(onTocarFim)();
+        }),
+    [onTocarInicio, onTocarFim, finalizarRedimensionar, emDestaque, alturaExtra]
+  );
 
   const estiloAnimado = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }, { translateY: translateY.value }],

@@ -98,6 +98,13 @@ export default function AgendaScreen() {
   const [eventoSelecionado, setEventoSelecionado] = useState<EventoPopupInfo | null>(null);
   const [desfazer, setDesfazer] = useState<{ mensagem: string; aoDesfazer: () => void } | null>(null);
   const desfazerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref sempre atualizada com a lista mais recente, para os callbacks abaixo
+  // não precisarem depender de `atendimentos` — isso os mantém com referência
+  // estável entre renders, senão os gestos de arrastar/redimensionar de cada
+  // atendimento seriam recriados a cada atualização e paravam de funcionar
+  // depois do primeiro uso.
+  const atendimentosRef = useRef<Atendimento[]>([]);
+  atendimentosRef.current = atendimentos;
 
   const carregarDados = useCallback(async () => {
     const { data: rows } = await supabase
@@ -152,27 +159,24 @@ export default function AgendaScreen() {
     [diaSelecionado]
   );
 
-  const aoPressionarEvento = useCallback(
-    (id: string) => {
-      const item = atendimentos.find((a) => a.id === id);
-      if (!item) return;
-      setEventoSelecionado({
-        id: item.id,
-        titulo: item.paciente_nome,
-        procedimento: item.procedimento,
-        clinicaNome: item.clinica_nome,
-        cor: item.clinica_cor || COR_PARTICULAR,
-        data: item.data,
-        hora: item.hora,
-        horaFim: item.hora_fim,
-      });
-    },
-    [atendimentos]
-  );
+  const aoPressionarEvento = useCallback((id: string) => {
+    const item = atendimentosRef.current.find((a) => a.id === id);
+    if (!item) return;
+    setEventoSelecionado({
+      id: item.id,
+      titulo: item.paciente_nome,
+      procedimento: item.procedimento,
+      clinicaNome: item.clinica_nome,
+      cor: item.clinica_cor || COR_PARTICULAR,
+      data: item.data,
+      hora: item.hora,
+      horaFim: item.hora_fim,
+    });
+  }, []);
 
   const moverAtendimento = useCallback(
     async (id: string, novaData: string, novaHora: string, novaHoraFim: string, mostrarDesfazer = true) => {
-      const original = atendimentos.find((a) => a.id === id);
+      const original = atendimentosRef.current.find((a) => a.id === id);
       if (!original) return;
       const anterior = { data: original.data, hora: original.hora, hora_fim: original.hora_fim };
 
@@ -207,7 +211,7 @@ export default function AgendaScreen() {
         setDesfazer(null);
       }
     },
-    [atendimentos]
+    []
   );
 
   const duplicarAtendimento = useCallback(async (id: string) => {
@@ -242,7 +246,7 @@ export default function AgendaScreen() {
         text: 'Excluir',
         style: 'destructive',
         onPress: async () => {
-          const atendimento = atendimentos.find((a) => a.id === id);
+          const atendimento = atendimentosRef.current.find((a) => a.id === id);
           const { error } = await supabase.from('atendimentos').delete().eq('id', id);
           if (error) {
             alertar('Erro ao excluir atendimento', error.message);
@@ -265,7 +269,7 @@ export default function AgendaScreen() {
         },
       },
     ]);
-  }, [atendimentos, carregarDados]);
+  }, [carregarDados]);
 
   const eventosPorDia = useMemo(() => {
     const mapa: Record<string, EventoTimeline[]> = {};
