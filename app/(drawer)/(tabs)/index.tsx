@@ -41,9 +41,14 @@ type Atendimento = {
   hora_fim: string;
   procedimento: string;
   status: string;
+  pago: boolean;
   paciente_nome: string;
+  tutor: string;
+  endereco: string | null;
+  clinica_id: string | null;
   clinica_nome: string | null;
   clinica_cor: string | null;
+  clinica_endereco: string | null;
 };
 
 function somarDias(iso: string, delta: number) {
@@ -109,15 +114,28 @@ export default function AgendaScreen() {
   const carregarDados = useCallback(async () => {
     const { data: rows } = await supabase
       .from('atendimentos')
-      .select('id, paciente_id, data, hora, hora_fim, procedimento, status, pacientes(nome), clinicas(nome, cor)')
+      .select(
+        'id, paciente_id, clinica_id, data, hora, hora_fim, procedimento, status, pago, pacientes(nome, tutor, endereco, atendido_em_residencia), clinicas(nome, cor, endereco)'
+      )
       .order('hora');
 
-    const todos: Atendimento[] = (rows ?? []).map((r: any) => ({
-      ...r,
-      paciente_nome: r.pacientes?.nome ?? '',
-      clinica_nome: r.clinicas?.nome ?? null,
-      clinica_cor: r.clinicas?.cor ?? null,
-    }));
+    const todosComCancelados: Atendimento[] = (rows ?? []).map((r: any) => {
+      const modoParticular = !r.clinica_id;
+      const residenciaAtiva = !modoParticular && !!r.pacientes?.atendido_em_residencia && !!r.pacientes?.endereco;
+      return {
+        ...r,
+        paciente_nome: r.pacientes?.nome ?? '',
+        tutor: r.pacientes?.tutor ?? '',
+        endereco: modoParticular || residenciaAtiva ? r.pacientes?.endereco ?? null : r.clinicas?.endereco ?? null,
+        clinica_nome: r.clinicas?.nome ?? null,
+        clinica_cor: r.clinicas?.cor ?? null,
+        clinica_endereco: r.clinicas?.endereco ?? null,
+      };
+    });
+
+    // Cancelados ficam ocultos da agenda (libera o horário visualmente), mas o
+    // registro permanece intacto no banco para um futuro relatório de cancelamentos.
+    const todos = todosComCancelados.filter((item) => item.status !== 'cancelado');
 
     const novasMarcacoes: any = {};
     todos.forEach((item) => {
@@ -171,6 +189,9 @@ export default function AgendaScreen() {
       data: item.data,
       hora: item.hora,
       horaFim: item.hora_fim,
+      tutor: item.tutor,
+      endereco: item.endereco,
+      pago: item.pago,
     });
   }, []);
 

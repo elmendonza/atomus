@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/src/theme';
 import { formatarDataBR } from '@/src/utils/tempo';
@@ -13,7 +13,14 @@ export type EventoPopupInfo = {
   data: string;
   hora: string;
   horaFim: string;
+  tutor: string;
+  endereco: string | null;
+  pago: boolean;
 };
+
+function abrirNoGoogleMaps(endereco: string) {
+  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}`);
+}
 
 type Props = {
   evento: EventoPopupInfo | null;
@@ -50,6 +57,7 @@ export function EventoPopup({ evento, onFechar, onEditar, onDuplicar, onExcluir 
               </Text>
               {!!evento.procedimento && <Text style={styles.detalhe}>{evento.procedimento}</Text>}
               <Text style={styles.detalhe}>{evento.clinicaNome || 'Particular'}</Text>
+              {!!evento.tutor && <Text style={styles.detalhe}>Tutor: {evento.tutor}</Text>}
             </View>
             <TouchableOpacity onPress={() => onEditar(evento.id)} hitSlop={8} style={styles.botaoIcone}>
               <Ionicons name="pencil-outline" size={18} color={theme.colors.textSecondary} />
@@ -57,6 +65,24 @@ export function EventoPopup({ evento, onFechar, onEditar, onDuplicar, onExcluir 
             <TouchableOpacity onPress={() => setMenuAberto((a) => !a)} hitSlop={8} style={styles.botaoIcone}>
               <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.textSecondary} />
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.linhaInfo}>
+            <View style={[styles.badge, evento.pago ? styles.badgePago : styles.badgePendente]}>
+              <Text style={[styles.badgeTexto, evento.pago ? styles.badgeTextoPago : styles.badgeTextoPendente]}>
+                {evento.pago ? 'Pago' : 'Pendente'}
+              </Text>
+            </View>
+            {!!evento.endereco && (
+              <TouchableOpacity
+                style={styles.enderecoBotao}
+                onPress={() => abrirNoGoogleMaps(evento.endereco!)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="location-outline" size={14} color={theme.colors.primary} />
+                <Text style={styles.enderecoTexto} numberOfLines={1}>{evento.endereco}</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {menuAberto && (
@@ -91,6 +117,24 @@ const styles = StyleSheet.create({
   titulo: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 15 },
   detalhe: { color: theme.colors.textSecondary, fontFamily: theme.font.regular, fontSize: 12, marginTop: 3 },
   botaoIcone: { padding: 2 },
+  linhaInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' },
+  badge: { borderRadius: theme.radius.sm, paddingVertical: 4, paddingHorizontal: 8 },
+  badgePago: { backgroundColor: theme.colors.successLight },
+  badgePendente: { backgroundColor: theme.colors.warningLight },
+  badgeTexto: { fontFamily: theme.font.medium, fontSize: 11 },
+  badgeTextoPago: { color: theme.colors.success },
+  badgeTextoPendente: { color: theme.colors.warning },
+  enderecoBotao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 1,
+    borderRadius: theme.radius.sm,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  enderecoTexto: { color: theme.colors.primary, fontFamily: theme.font.regular, fontSize: 12, flexShrink: 1 },
   menu: {
     marginTop: 10,
     borderTopWidth: 1,
