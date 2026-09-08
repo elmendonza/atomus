@@ -14,7 +14,7 @@ const DURACAO_PADRAO_MIN = 60;
 const LARGURA_LABEL_HORA = 42;
 const HORAS = Array.from({ length: 24 }, (_, i) => i);
 const DISTANCIA_MINIMA_ARRASTO = 6; // px — distância máxima para o gesto ainda contar como toque
-const ESPERA_PARA_LIBERAR_ARRASTO_MS = 2000; // tempo de toque-e-segure para liberar arrastar/redimensionar
+const ESPERA_PARA_LIBERAR_ARRASTO_MS = 1000; // tempo de toque-e-segure para liberar arrastar/redimensionar
 
 export type EventoTimeline = {
   id: string;
