@@ -1,6 +1,7 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, GestureResponderEvent } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import { ScrollView, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { theme } from '@/src/theme';
 
 // Faixa que deve caber inteira na tela, sem precisar rolar, ao abrir a agenda.
@@ -12,7 +13,7 @@ const ALTURA_HORA_PADRAO = 45; // usado só até medirmos a tela de verdade
 const DURACAO_PADRAO_MIN = 60;
 const LARGURA_LABEL_HORA = 42;
 const HORAS = Array.from({ length: 24 }, (_, i) => i);
-const DISTANCIA_MINIMA_ARRASTO = 6; // px — abaixo disso, tratamos como toque (abre popup), não arrasto
+const DISTANCIA_MINIMA_ARRASTO = 6; // px — distância máxima para o gesto ainda contar como toque
 
 export type EventoTimeline = {
   id: string;
@@ -23,6 +24,8 @@ export type EventoTimeline = {
   procedimento: string;
   cor: string;
 };
+
+type EventoComLayout = EventoTimeline & { coluna: number; totalColunas: number };
 
 function paraMinutos(hora: string) {
   const [hh, mm] = hora.split(':').map(Number);
@@ -38,21 +41,43 @@ function arredondarPara15(minutos: number) {
   return Math.round(minutos / 15) * 15;
 }
 
+/** Divide eventos que se sobrepõem no tempo em colunas lado a lado, como no Google Agenda. */
+function calcularLayoutEventos(eventos: EventoTimeline[]): EventoComLayout[] {
+  const ordenados = [...eventos].sort((a, b) => {
+    const inicioA = paraMinutos(a.hora);
+    const inicioB = paraMinutos(b.hora);
+    if (inicioA !== inicioB) return inicioA - inicioB;
+    return paraMinutos(b.horaFim) - paraMinutos(a.horaFim);
+  });
+
+  const colunas: { fimMin: number }[] = [];
+  const atribuicoes: { ev: EventoTimeline; coluna: number; inicioMin: number; fimMin: number }[] = [];
+
+  for (const ev of ordenados) {
+    const inicioMin = paraMinutos(ev.hora);
+    const fimMin = Math.max(paraMinutos(ev.horaFim), inicioMin + 1);
+    let colunaEscolhida = colunas.findIndex((c) => c.fimMin <= inicioMin);
+    if (colunaEscolhida === -1) {
+      colunaEscolhida = colunas.length;
+      colunas.push({ fimMin });
+    } else {
+      colunas[colunaEscolhida].fimMin = fimMin;
+    }
+    atribuicoes.push({ ev, coluna: colunaEscolhida, inicioMin, fimMin });
+  }
+
+  return atribuicoes.map(({ ev, coluna, inicioMin, fimMin }) => {
+    const sobrepostos = atribuicoes.filter((o) => o.inicioMin < fimMin && o.fimMin > inicioMin);
+    const totalColunas = Math.max(1, ...sobrepostos.map((o) => o.coluna + 1));
+    return { ...ev, coluna, totalColunas };
+  });
+}
+
 export type DiaTimeline = {
   iso: string;
   letra: string;
   numero: number;
   hoje: boolean;
-};
-
-type Arrasto = {
-  id: string;
-  tipo: 'mover' | 'redimensionar';
-  indiceDia: number;
-  startPageX: number;
-  startPageY: number;
-  horaOriginal: string;
-  horaFimOriginal: string;
 };
 
 type Props = {
@@ -67,6 +92,160 @@ function pad(n: number) {
   return String(n).padStart(2, '0');
 }
 
+type EventoBlocoProps = {
+  ev: EventoComLayout;
+  indiceDia: number;
+  diasIso: string[];
+  larguraColuna: number;
+  alturaHora: number;
+  compacto: boolean;
+  onPressEvento: (id: string) => void;
+  onMoverEvento?: (id: string, novaData: string, novaHora: string, novaHoraFim: string) => void;
+  onTocarInicio: () => void;
+  onTocarFim: () => void;
+};
+
+const EventoBloco = memo(function EventoBloco({
+  ev,
+  indiceDia,
+  diasIso,
+  larguraColuna,
+  alturaHora,
+  compacto,
+  onPressEvento,
+  onMoverEvento,
+  onTocarInicio,
+  onTocarFim,
+}: EventoBlocoProps) {
+  const inicioMin = paraMinutos(ev.hora);
+  const fimMin = paraMinutos(ev.horaFim);
+  const duracaoMin = fimMin > inicioMin ? fimMin - inicioMin : DURACAO_PADRAO_MIN;
+  const topPx = inicioMin * (alturaHora / 60);
+  const alturaBase = Math.max(duracaoMin * (alturaHora / 60), compacto ? 30 : 26);
+
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const alturaExtra = useSharedValue(0);
+  const emDestaque = useSharedValue(0);
+
+  function finalizarMover(deltaX: number, deltaY: number) {
+    const distancia = Math.hypot(deltaX, deltaY);
+    if (distancia < DISTANCIA_MINIMA_ARRASTO) return;
+    if (!onMoverEvento || alturaHora === 0) return;
+    const minutosPorPixel = 60 / alturaHora;
+    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+    const novoInicioMin = Math.max(0, Math.min(1440 - duracaoMin, inicioMin + deltaMinutos));
+    const novoFimMin = novoInicioMin + duracaoMin;
+    const deltaColunas = larguraColuna > 0 ? Math.round(deltaX / larguraColuna) : 0;
+    const novoIndiceDia = Math.max(0, Math.min(diasIso.length - 1, indiceDia + deltaColunas));
+    onMoverEvento(ev.id, diasIso[novoIndiceDia], formatarMinutos(novoInicioMin), formatarMinutos(novoFimMin));
+  }
+
+  function finalizarRedimensionar(deltaY: number) {
+    if (!onMoverEvento || alturaHora === 0) return;
+    const minutosPorPixel = 60 / alturaHora;
+    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
+    const novoFimMin = Math.max(inicioMin + 15, fimMin + deltaMinutos);
+    onMoverEvento(ev.id, diasIso[indiceDia], ev.hora, formatarMinutos(novoFimMin));
+  }
+
+  const gestoToque = Gesture.Tap()
+    .maxDuration(180)
+    .maxDistance(DISTANCIA_MINIMA_ARRASTO)
+    .onEnd(() => {
+      runOnJS(onPressEvento)(ev.id);
+    });
+
+  const gestoArrastar = Gesture.Pan()
+    .activateAfterLongPress(180)
+    .onBegin(() => {
+      emDestaque.value = 1;
+      runOnJS(onTocarInicio)();
+    })
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+      translateY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      runOnJS(finalizarMover)(e.translationX, e.translationY);
+      translateX.value = withTiming(0, { duration: 150 });
+      translateY.value = withTiming(0, { duration: 150 });
+    })
+    .onFinalize(() => {
+      emDestaque.value = 0;
+      runOnJS(onTocarFim)();
+    });
+
+  const gestoMover = Gesture.Race(gestoToque, gestoArrastar);
+
+  const gestoRedimensionar = Gesture.Pan()
+    .activateAfterLongPress(180)
+    .onBegin(() => {
+      emDestaque.value = 1;
+      runOnJS(onTocarInicio)();
+    })
+    .onUpdate((e) => {
+      alturaExtra.value = e.translationY;
+    })
+    .onEnd((e) => {
+      runOnJS(finalizarRedimensionar)(e.translationY);
+      alturaExtra.value = withTiming(0, { duration: 150 });
+    })
+    .onFinalize(() => {
+      emDestaque.value = 0;
+      runOnJS(onTocarFim)();
+    });
+
+  const estiloAnimado = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }, { translateY: translateY.value }],
+    height: Math.max(20, alturaBase + alturaExtra.value),
+    zIndex: emDestaque.value ? 10 : 1,
+    opacity: emDestaque.value ? 0.88 : 1,
+  }));
+
+  const larguraPercentual = 100 / ev.totalColunas;
+  const leftPercentual = ev.coluna * larguraPercentual;
+
+  return (
+    <GestureDetector gesture={gestoMover}>
+      <Animated.View
+        style={[
+          styles.evento,
+          {
+            top: topPx,
+            left: `${leftPercentual}%`,
+            width: `${larguraPercentual}%`,
+            backgroundColor: ev.cor + '26',
+            borderLeftColor: ev.cor,
+          },
+          estiloAnimado,
+        ]}
+      >
+        <Text
+          numberOfLines={compacto ? 2 : 1}
+          style={[styles.eventoTexto, { color: theme.colors.text, fontSize: compacto ? 10 : 13 }]}
+        >
+          {ev.paciente_nome}
+          {!compacto ? ` · ${ev.clinica_nome || 'Particular'}` : ''}
+        </Text>
+        {!compacto && (
+          <Text style={[styles.eventoDetalhe, { color: ev.cor }]} numberOfLines={1}>
+            {ev.hora}–{ev.horaFim} · {ev.procedimento || 'Consulta'}
+          </Text>
+        )}
+
+        {!!onMoverEvento && (
+          <GestureDetector gesture={gestoRedimensionar}>
+            <View style={styles.alcaRedimensionar}>
+              <View style={styles.alcaRedimensionarTraco} />
+            </View>
+          </GestureDetector>
+        )}
+      </Animated.View>
+    </GestureDetector>
+  );
+});
+
 export const AgendaTimeline = memo(function AgendaTimeline({
   dias,
   eventosPorDia,
@@ -77,16 +256,15 @@ export const AgendaTimeline = memo(function AgendaTimeline({
   const [largura, setLargura] = useState(0);
   const [alturaContainer, setAlturaContainer] = useState(0);
   const [agora, setAgora] = useState(new Date());
+  const [toquesAtivos, setToquesAtivos] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const jaRolou = useRef(false);
 
-  const arrastoRef = useRef<Arrasto | null>(null);
-  const deltaAtualRef = useRef({ x: 0, y: 0 });
-  const [arrastando, setArrastando] = useState<{ id: string; tipo: 'mover' | 'redimensionar'; deltaX: number; deltaY: number } | null>(
-    null
-  );
+  const onTocarInicio = useCallback(() => setToquesAtivos((n) => n + 1), []);
+  const onTocarFim = useCallback(() => setToquesAtivos((n) => Math.max(0, n - 1)), []);
 
   const alturaHora = alturaContainer > 0 ? alturaContainer / HORAS_VISIVEIS : ALTURA_HORA_PADRAO;
+  const diasIso = useMemo(() => dias.map((d) => d.iso), [dias]);
 
   const estiloGradeWeb = useMemo(
     () =>
@@ -105,68 +283,18 @@ export const AgendaTimeline = memo(function AgendaTimeline({
 
   useEffect(() => {
     jaRolou.current = false;
-  }, [dias.map((d) => d.iso).join(',')]);
+  }, [diasIso.join(',')]);
+
+  const eventosPorDiaComLayout = useMemo(() => {
+    const resultado: Record<string, EventoComLayout[]> = {};
+    for (const iso of diasIso) {
+      resultado[iso] = calcularLayoutEventos(eventosPorDia[iso] || []);
+    }
+    return resultado;
+  }, [diasIso, eventosPorDia]);
 
   const larguraColuna = largura > 0 ? (largura - LARGURA_LABEL_HORA) / dias.length : 0;
   const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
-
-  function iniciarArrasto(evt: GestureResponderEvent, ev: EventoTimeline, indiceDia: number, tipo: 'mover' | 'redimensionar') {
-    arrastoRef.current = {
-      id: ev.id,
-      tipo,
-      indiceDia,
-      startPageX: evt.nativeEvent.pageX,
-      startPageY: evt.nativeEvent.pageY,
-      horaOriginal: ev.hora,
-      horaFimOriginal: ev.horaFim,
-    };
-    deltaAtualRef.current = { x: 0, y: 0 };
-    setArrastando({ id: ev.id, tipo, deltaX: 0, deltaY: 0 });
-  }
-
-  function moverArrasto(evt: GestureResponderEvent) {
-    const info = arrastoRef.current;
-    if (!info) return;
-    const deltaX = evt.nativeEvent.pageX - info.startPageX;
-    const deltaY = evt.nativeEvent.pageY - info.startPageY;
-    deltaAtualRef.current = { x: deltaX, y: deltaY };
-    setArrastando({ id: info.id, tipo: info.tipo, deltaX, deltaY });
-  }
-
-  function finalizarArrasto() {
-    const info = arrastoRef.current;
-    const { x: deltaX, y: deltaY } = deltaAtualRef.current;
-    arrastoRef.current = null;
-    deltaAtualRef.current = { x: 0, y: 0 };
-    setArrastando(null);
-    if (!info) return;
-
-    const distancia = Math.hypot(deltaX, deltaY);
-    if (distancia < DISTANCIA_MINIMA_ARRASTO) {
-      onPressEvento(info.id);
-      return;
-    }
-    if (!onMoverEvento || alturaHora === 0) return;
-
-    const minutosPorPixel = 60 / alturaHora;
-    const inicioOriginalMin = paraMinutos(info.horaOriginal);
-    const fimOriginalMin = paraMinutos(info.horaFimOriginal);
-    const duracaoOriginal = Math.max(15, fimOriginalMin - inicioOriginalMin);
-
-    if (info.tipo === 'redimensionar') {
-      const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
-      const novoFimMin = Math.max(inicioOriginalMin + 15, fimOriginalMin + deltaMinutos);
-      onMoverEvento(info.id, dias[info.indiceDia].iso, info.horaOriginal, formatarMinutos(novoFimMin));
-      return;
-    }
-
-    const deltaMinutos = arredondarPara15(deltaY * minutosPorPixel);
-    const novoInicioMin = Math.max(0, Math.min(1440 - duracaoOriginal, inicioOriginalMin + deltaMinutos));
-    const novoFimMin = novoInicioMin + duracaoOriginal;
-    const deltaColunas = larguraColuna > 0 ? Math.round(deltaX / larguraColuna) : 0;
-    const novoIndiceDia = Math.max(0, Math.min(dias.length - 1, info.indiceDia + deltaColunas));
-    onMoverEvento(info.id, dias[novoIndiceDia].iso, formatarMinutos(novoInicioMin), formatarMinutos(novoFimMin));
-  }
 
   return (
     <View style={styles.container}>
@@ -188,7 +316,7 @@ export const AgendaTimeline = memo(function AgendaTimeline({
         ref={scrollRef}
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!arrastando}
+        scrollEnabled={toquesAtivos === 0}
         onLayout={(e) => {
           setLargura(e.nativeEvent.layout.width);
           setAlturaContainer(e.nativeEvent.layout.height);
@@ -220,65 +348,21 @@ export const AgendaTimeline = memo(function AgendaTimeline({
               {!estiloGradeWeb &&
                 HORAS.map((h) => <View key={h} style={[styles.linhaHora, { top: h * alturaHora }]} />)}
 
-              {(eventosPorDia[dia.iso] || []).map((ev) => {
-                const inicioMin = paraMinutos(ev.hora);
-                const fimMin = paraMinutos(ev.horaFim);
-                const duracaoMin = fimMin > inicioMin ? fimMin - inicioMin : DURACAO_PADRAO_MIN;
-                const estaArrastando = arrastando?.id === ev.id;
-                const deltaMover = estaArrastando && arrastando!.tipo === 'mover' ? arrastando! : null;
-                const deltaRedimensionar = estaArrastando && arrastando!.tipo === 'redimensionar' ? arrastando! : null;
-                const topPx = inicioMin * (alturaHora / 60);
-                const alturaBase = Math.max(duracaoMin * (alturaHora / 60), compacto ? 30 : 26);
-                const alturaPx = deltaRedimensionar ? Math.max(20, alturaBase + deltaRedimensionar.deltaY) : alturaBase;
-                return (
-                  <View
-                    key={ev.id}
-                    style={[
-                      styles.evento,
-                      {
-                        top: topPx,
-                        height: alturaPx,
-                        backgroundColor: ev.cor + '26',
-                        borderLeftColor: ev.cor,
-                        zIndex: estaArrastando ? 10 : 1,
-                        opacity: estaArrastando ? 0.85 : 1,
-                        transform: deltaMover ? [{ translateX: deltaMover.deltaX }, { translateY: deltaMover.deltaY }] : undefined,
-                      },
-                    ]}
-                    onStartShouldSetResponder={() => true}
-                    onResponderTerminationRequest={() => false}
-                    onResponderGrant={(e) => iniciarArrasto(e, ev, indiceDia, 'mover')}
-                    onResponderMove={moverArrasto}
-                    onResponderRelease={finalizarArrasto}
-                  >
-                    <Text
-                      numberOfLines={compacto ? 2 : 1}
-                      style={[styles.eventoTexto, { color: theme.colors.text, fontSize: compacto ? 10 : 13 }]}
-                    >
-                      {ev.paciente_nome}
-                      {!compacto ? ` · ${ev.clinica_nome || 'Particular'}` : ''}
-                    </Text>
-                    {!compacto && (
-                      <Text style={[styles.eventoDetalhe, { color: ev.cor }]} numberOfLines={1}>
-                        {ev.hora}–{ev.horaFim} · {ev.procedimento || 'Consulta'}
-                      </Text>
-                    )}
-
-                    {!!onMoverEvento && (
-                      <View
-                        style={styles.alcaRedimensionar}
-                        onStartShouldSetResponder={() => true}
-                        onResponderTerminationRequest={() => false}
-                        onResponderGrant={(e) => iniciarArrasto(e, ev, indiceDia, 'redimensionar')}
-                        onResponderMove={moverArrasto}
-                        onResponderRelease={finalizarArrasto}
-                      >
-                        <View style={styles.alcaRedimensionarTraco} />
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+              {(eventosPorDiaComLayout[dia.iso] || []).map((ev) => (
+                <EventoBloco
+                  key={ev.id}
+                  ev={ev}
+                  indiceDia={indiceDia}
+                  diasIso={diasIso}
+                  larguraColuna={larguraColuna}
+                  alturaHora={alturaHora}
+                  compacto={compacto}
+                  onPressEvento={onPressEvento}
+                  onMoverEvento={onMoverEvento}
+                  onTocarInicio={onTocarInicio}
+                  onTocarFim={onTocarFim}
+                />
+              ))}
 
               {dia.hoje && (
                 <View style={[styles.linhaAgora, { top: minutosAgora * (alturaHora / 60) }]}>
@@ -332,10 +416,10 @@ const styles = StyleSheet.create({
   },
   evento: {
     position: 'absolute',
-    left: 2,
-    right: 2,
     borderRadius: 6,
     borderLeftWidth: 3,
+    borderRightWidth: 1,
+    borderRightColor: theme.colors.background,
     padding: 4,
     overflow: 'hidden',
   },
