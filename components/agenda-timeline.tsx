@@ -42,6 +42,13 @@ function arredondarPara15(minutos: number) {
   return Math.round(minutos / 15) * 15;
 }
 
+/** Vibração bem curta ao liberar o arrastar/redimensionar. Só tem efeito em navegadores que suportam a Vibration API (Android/Chrome); em outros, não faz nada. */
+function vibrarLiberacao() {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    navigator.vibrate(15);
+  }
+}
+
 /** Divide eventos que se sobrepõem no tempo em colunas lado a lado, como no Google Agenda. */
 function calcularLayoutEventos(eventos: EventoTimeline[]): EventoComLayout[] {
   const ordenados = [...eventos].sort((a, b) => {
@@ -163,6 +170,9 @@ const EventoBloco = memo(function EventoBloco({
       emDestaque.value = 1;
       runOnJS(onTocarInicio)();
     })
+    .onStart(() => {
+      runOnJS(vibrarLiberacao)();
+    })
     .onUpdate((e) => {
       translateX.value = e.translationX;
       translateY.value = e.translationY;
@@ -184,6 +194,9 @@ const EventoBloco = memo(function EventoBloco({
     .onBegin(() => {
       emDestaque.value = 1;
       runOnJS(onTocarInicio)();
+    })
+    .onStart(() => {
+      runOnJS(vibrarLiberacao)();
     })
     .onUpdate((e) => {
       alturaExtra.value = e.translationY;
