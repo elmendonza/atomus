@@ -14,6 +14,7 @@ const DURACAO_PADRAO_MIN = 60;
 const LARGURA_LABEL_HORA = 42;
 const HORAS = Array.from({ length: 24 }, (_, i) => i);
 const DISTANCIA_MINIMA_ARRASTO = 6; // px — distância máxima para o gesto ainda contar como toque
+const ESPERA_PARA_LIBERAR_ARRASTO_MS = 2000; // tempo de toque-e-segure para liberar arrastar/redimensionar
 
 export type EventoTimeline = {
   id: string;
@@ -150,14 +151,14 @@ const EventoBloco = memo(function EventoBloco({
   }
 
   const gestoToque = Gesture.Tap()
-    .maxDuration(180)
+    .maxDuration(ESPERA_PARA_LIBERAR_ARRASTO_MS - 100)
     .maxDistance(DISTANCIA_MINIMA_ARRASTO)
     .onEnd(() => {
       runOnJS(onPressEvento)(ev.id);
     });
 
   const gestoArrastar = Gesture.Pan()
-    .activateAfterLongPress(180)
+    .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
     .onBegin(() => {
       emDestaque.value = 1;
       runOnJS(onTocarInicio)();
@@ -179,7 +180,7 @@ const EventoBloco = memo(function EventoBloco({
   const gestoMover = Gesture.Race(gestoToque, gestoArrastar);
 
   const gestoRedimensionar = Gesture.Pan()
-    .activateAfterLongPress(180)
+    .activateAfterLongPress(ESPERA_PARA_LIBERAR_ARRASTO_MS)
     .onBegin(() => {
       emDestaque.value = 1;
       runOnJS(onTocarInicio)();
