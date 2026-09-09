@@ -51,6 +51,37 @@ export function somarMeses(iso: string, meses: number): string {
   return dateParaIso(alvo);
 }
 
+export function mesesEntre(isoInicio: string, isoFim: string): number {
+  const a = isoParaDate(isoInicio);
+  const b = isoParaDate(isoFim);
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+}
+
+export type UnidadeIdade = 'meses' | 'anos';
+
+/** A partir de uma idade aproximada (ex: 9 meses), estima o mês/ano de nascimento. */
+export function nascimentoAPartirDeIdade(
+  quantidade: number,
+  unidade: UnidadeIdade,
+  referenciaIso: string = hoje()
+): { mes: number; ano: number } {
+  const totalMeses = unidade === 'anos' ? quantidade * 12 : quantidade;
+  const d = isoParaDate(somarMeses(referenciaIso, -totalMeses));
+  return { mes: d.getMonth() + 1, ano: d.getFullYear() };
+}
+
+/** A partir do mês/ano de nascimento, calcula a idade atual (evolui sozinha com o tempo). */
+export function idadeAPartirDeNascimento(
+  mes: number,
+  ano: number,
+  referenciaIso: string = hoje()
+): { quantidade: number; unidade: UnidadeIdade } {
+  const nascimentoIso = `${ano}-${String(mes).padStart(2, '0')}-01`;
+  const totalMeses = Math.max(0, mesesEntre(nascimentoIso, referenciaIso));
+  if (totalMeses < 12) return { quantidade: totalMeses, unidade: 'meses' };
+  return { quantidade: Math.floor(totalMeses / 12), unidade: 'anos' };
+}
+
 export type UnidadeRecorrencia = 'dia' | 'semana' | 'mes' | 'ano';
 export type FimRecorrencia = 'nunca' | 'apos' | 'data';
 

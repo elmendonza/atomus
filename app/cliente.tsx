@@ -9,10 +9,20 @@ import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR, FORMAS_PAGAMENTO } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
-import { horaParaDate, dateParaHora } from '@/src/utils/tempo';
+import {
+  horaParaDate, dateParaHora, hoje, dateParaIso,
+  nascimentoAPartirDeIdade, idadeAPartirDeNascimento, type UnidadeIdade,
+} from '@/src/utils/tempo';
 import { formatarTelefone } from '@/src/utils/formato';
 
 const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'];
+
+/** Melhor esforço para converter o antigo campo de texto livre "Idade" (ex: "2 anos"). */
+function interpretarIdadeAntiga(texto: string): { quantidade: number; unidade: UnidadeIdade } | null {
+  const match = texto.match(/(\d+)/);
+  if (!match) return null;
+  return { quantidade: parseInt(match[1], 10), unidade: /ano/i.test(texto) ? 'anos' : 'meses' };
+}
 
 type Clinica = { id: string; nome: string; cor: string; endereco: string | null };
 
@@ -37,7 +47,11 @@ export default function ClienteScreen() {
   const [mostrarCompleto, setMostrarCompleto] = useState(false);
   const [cpf, setCpf] = useState('');
   const [raca, setRaca] = useState('');
-  const [idade, setIdade] = useState('');
+  const [idadeQuantidade, setIdadeQuantidade] = useState('');
+  const [idadeUnidade, setIdadeUnidade] = useState<UnidadeIdade>('meses');
+  const [nascimentoMes, setNascimentoMes] = useState<number | null>(null);
+  const [nascimentoAno, setNascimentoAno] = useState<number | null>(null);
+  const [idadeEditada, setIdadeEditada] = useState(false);
 
   const [atendidoEmResidencia, setAtendidoEmResidencia] = useState(false);
   const [temPacote, setTemPacote] = useState(false);
@@ -55,7 +69,9 @@ export default function ClienteScreen() {
 
         const { data: item, error } = await supabase
           .from('pacientes')
-          .select('nome, tutor, telefone, forma_pagamento_preferida, dias_preferidos, horario_preferido, endereco, clinica_id, cpf, raca, idade, atendido_em_residencia')
+          .select(
+            'nome, tutor, telefone, forma_pagamento_preferida, dias_preferidos, horario_preferido, endereco, clinica_id, cpf, raca, idade, nascimento_mes, nascimento_ano, atendido_em_residencia, created_at'
+          )
           .eq('id', pacienteId)
           .single();
         if (error) {
@@ -72,8 +88,30 @@ export default function ClienteScreen() {
           setModoParticular(item.clinica_id == null);
           setCpf(item.cpf || '');
           setRaca(item.raca || '');
-          setIdade(item.idade || '');
-          setMostrarCompleto(!!(item.cpf || item.raca || item.idade));
+
+          if (item.nascimento_mes && item.nascimento_ano) {
+            setNascimentoMes(item.nascimento_mes);
+            setNascimentoAno(item.nascimento_ano);
+            const atual = idadeAPartirDeNascimento(item.nascimento_mes, item.nascimento_ano);
+            setIdadeQuantidade(String(atual.quantidade));
+            setIdadeUnidade(atual.unidade);
+          } else if (item.idade) {
+            // Cadastro antigo: só existia o texto livre. Convertemos usando a data de
+            // criação do cadastro como referência aproximada (melhor esforço).
+            const interpretada = interpretarIdadeAntiga(item.idade);
+            if (interpretada) {
+              const referencia = item.created_at ? dateParaIso(new Date(item.created_at)) : hoje();
+              const nascimento = nascimentoAPartirDeIdade(interpretada.quantidade, interpretada.unidade, referencia);
+              setNascimentoMes(nascimento.mes);
+              setNascimentoAno(nascimento.ano);
+              const atual = idadeAPartirDeNascimento(nascimento.mes, nascimento.ano);
+              setIdadeQuantidade(String(atual.quantidade));
+              setIdadeUnidade(atual.unidade);
+            }
+          }
+          setIdadeEditada(false);
+
+          setMostrarCompleto(!!(item.cpf || item.raca || item.idade || item.nascimento_mes));
           setAtendidoEmResidencia(!!item.atendido_em_residencia);
         }
 
@@ -101,6 +139,23 @@ export default function ClienteScreen() {
       return;
     }
     const residenciaAtiva = !modoParticular && atendidoEmResidencia;
+
+    let novoNascimentoMes: number | null = null;
+    let novoNascimentoAno: number | null = null;
+    const quantidadeIdade = parseInt(idadeQuantidade, 10);
+    if (mostrarCompleto && idadeQuantidade.trim() && Number.isFinite(quantidadeIdade)) {
+      if (!idadeEditada && nascimentoMes && nascimentoAno) {
+        // Idade não foi mexida nesta sessão: mantém a data-base já calculada,
+        // para não "reiniciar o relógio" a cada vez que o cadastro é salvo.
+        novoNascimentoMes = nascimentoMes;
+        novoNascimentoAno = nascimentoAno;
+      } else {
+        const nascimento = nascimentoAPartirDeIdade(quantidadeIdade, idadeUnidade);
+        novoNascimentoMes = nascimento.mes;
+        novoNascimentoAno = nascimento.ano;
+      }
+    }
+
     const dadosPaciente = {
       nome: nome.trim(),
       tutor: tutor.trim(),
@@ -113,7 +168,8 @@ export default function ClienteScreen() {
       atendido_em_residencia: residenciaAtiva,
       cpf: mostrarCompleto ? cpf.trim() : '',
       raca: mostrarCompleto ? raca.trim() : '',
-      idade: mostrarCompleto ? idade.trim() : '',
+      nascimento_mes: novoNascimentoMes,
+      nascimento_ano: novoNascimentoAno,
     };
 
     let idFinal = pacienteId;
@@ -358,14 +414,37 @@ export default function ClienteScreen() {
               onChangeText={setRaca}
             />
 
-            <Text style={styles.label}>Idade</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: 2 anos, 6 meses..."
-              placeholderTextColor={theme.colors.textTertiary}
-              value={idade}
-              onChangeText={setIdade}
-            />
+            <Text style={styles.label}>Idade aproximada</Text>
+            <View style={styles.idadeLinha}>
+              <TextInput
+                style={[styles.input, styles.idadeInput]}
+                placeholder="Ex: 9"
+                placeholderTextColor={theme.colors.textTertiary}
+                keyboardType="numeric"
+                value={idadeQuantidade}
+                onChangeText={(texto) => {
+                  setIdadeQuantidade(texto.replace(/[^0-9]/g, ''));
+                  setIdadeEditada(true);
+                }}
+              />
+              <View style={styles.chipsContainer}>
+                {(['meses', 'anos'] as const).map((u) => (
+                  <TouchableOpacity
+                    key={u}
+                    style={[styles.diaChip, idadeUnidade === u && styles.diaChipAtivo]}
+                    onPress={() => {
+                      setIdadeUnidade(u);
+                      setIdadeEditada(true);
+                    }}
+                  >
+                    <Text style={[styles.diaChipTexto, idadeUnidade === u && styles.chipTextoAtivo]}>
+                      {u === 'meses' ? 'Meses' : 'Anos'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <Text style={styles.completoDica}>A idade evolui sozinha com o tempo — não precisa atualizar depois.</Text>
           </>
         )}
 
@@ -412,6 +491,8 @@ const styles = StyleSheet.create({
     fontSize: 15, fontFamily: theme.font.regular, color: theme.colors.text, backgroundColor: theme.colors.surface,
   },
   chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  idadeLinha: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  idadeInput: { width: 80 },
   diaChip: {
     borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.full,
     paddingVertical: 8, paddingHorizontal: 16, backgroundColor: theme.colors.surface,
