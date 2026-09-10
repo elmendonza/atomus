@@ -13,7 +13,7 @@ import {
   horaParaDate, dateParaHora, hoje, dateParaIso,
   nascimentoAPartirDeIdade, idadeAPartirDeNascimento, type UnidadeIdade,
 } from '@/src/utils/tempo';
-import { formatarTelefone } from '@/src/utils/formato';
+import { formatarTelefone, formatarCPF } from '@/src/utils/formato';
 
 const DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'];
 
@@ -86,7 +86,7 @@ export default function ClienteScreen() {
           setEndereco(item.endereco || '');
           setClinicaId(item.clinica_id);
           setModoParticular(item.clinica_id == null);
-          setCpf(item.cpf || '');
+          setCpf(formatarCPF(item.cpf || ''));
           setRaca(item.raca || '');
 
           if (item.nascimento_mes && item.nascimento_ano) {
@@ -402,7 +402,8 @@ export default function ClienteScreen() {
               placeholderTextColor={theme.colors.textTertiary}
               keyboardType="numeric"
               value={cpf}
-              onChangeText={setCpf}
+              onChangeText={(texto) => setCpf(formatarCPF(texto))}
+              maxLength={14}
             />
 
             <Text style={styles.label}>Raça</Text>
