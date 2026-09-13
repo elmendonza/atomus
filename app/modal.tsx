@@ -27,6 +27,7 @@ type PacienteSugestao = {
   horario_preferido: string | null;
   endereco: string | null;
   atendido_em_residencia: boolean | null;
+  clinica_id: string | null;
 };
 
 const STATUS_OPCOES = ['agendado', 'realizado', 'cancelado'] as const;
@@ -168,7 +169,7 @@ export default function ModalAtendimento() {
     (async () => {
       const { data: rows } = await supabase
         .from('pacientes')
-        .select('id, nome, tutor, telefone, forma_pagamento_preferida, horario_preferido, endereco, atendido_em_residencia')
+        .select('id, nome, tutor, telefone, forma_pagamento_preferida, horario_preferido, endereco, atendido_em_residencia, clinica_id')
         .ilike('nome', `%${termo}%`)
         .order('nome')
         .limit(5);
@@ -212,19 +213,12 @@ export default function ModalAtendimento() {
   async function aplicarUltimoAtendimento(pacienteId: string) {
     const { data: ultimo } = await supabase
       .from('atendimentos')
-      .select('clinica_id, procedimento, valor')
+      .select('procedimento, valor')
       .eq('paciente_id', pacienteId)
       .order('data', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (!ultimo) return;
-    if (ultimo.clinica_id) {
-      setClinicaId(ultimo.clinica_id);
-      setModoParticular(false);
-    } else {
-      setClinicaId(null);
-      setModoParticular(true);
-    }
     aplicarProcedimento(ultimo.procedimento || '');
     if (ultimo.valor) {
       setValor(String(ultimo.valor).replace('.', ','));
@@ -238,6 +232,15 @@ export default function ModalAtendimento() {
     setTelefone(item.telefone || '');
     setEnderecoPaciente(item.endereco || '');
     setAtendidoEmResidencia(!!item.atendido_em_residencia);
+    // A clínica segue a do cadastro do paciente, não a do último atendimento —
+    // assim não muda sozinha se um atendimento pontual tiver sido em outra clínica.
+    if (item.clinica_id) {
+      setClinicaId(item.clinica_id);
+      setModoParticular(false);
+    } else {
+      setClinicaId(null);
+      setModoParticular(true);
+    }
     carregarPacote(item.id);
     aplicarUltimoAtendimento(item.id);
     if (!formaPagamento && item.forma_pagamento_preferida) {
