@@ -3,6 +3,7 @@ import {
   StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/auth-context';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
@@ -13,6 +14,7 @@ export default function LoginScreen() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false);
 
@@ -101,14 +103,27 @@ export default function LoginScreen() {
           />
 
           <Text style={styles.label}>Senha</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor={theme.colors.textTertiary}
-            secureTextEntry
-            value={senha}
-            onChangeText={setSenha}
-          />
+          <View style={styles.campoSenhaContainer}>
+            <TextInput
+              style={styles.inputSenha}
+              placeholder="••••••••"
+              placeholderTextColor={theme.colors.textTertiary}
+              secureTextEntry={!mostrarSenha}
+              value={senha}
+              onChangeText={setSenha}
+            />
+            <TouchableOpacity
+              onPress={() => setMostrarSenha(!mostrarSenha)}
+              style={styles.botaoOlho}
+              hitSlop={8}
+            >
+              <Ionicons
+                name={mostrarSenha ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={theme.colors.textSecondary}
+              />
+            </TouchableOpacity>
+          </View>
 
           {!modoCadastro && (
             <TouchableOpacity onPress={esqueciSenha} style={styles.linkEsqueciContainer} disabled={enviandoRecuperacao}>
@@ -171,6 +186,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.md, padding: 12,
     fontSize: 15, fontFamily: theme.font.regular, color: theme.colors.text, backgroundColor: theme.colors.surface,
   },
+  campoSenhaContainer: { position: 'relative', justifyContent: 'center' },
+  inputSenha: {
+    borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.md, padding: 12,
+    paddingRight: 44,
+    fontSize: 15, fontFamily: theme.font.regular, color: theme.colors.text, backgroundColor: theme.colors.surface,
+  },
+  botaoOlho: { position: 'absolute', right: 12 },
   botao: { backgroundColor: theme.colors.primary, padding: 15, borderRadius: theme.radius.md, alignItems: 'center', marginTop: 28 },
   botaoTexto: { color: '#fff', fontFamily: theme.font.medium, fontSize: 15 },
   linkContainer: { marginTop: 18, alignItems: 'center' },
