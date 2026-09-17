@@ -116,6 +116,14 @@ export default function ModalAtendimento() {
   const [sugestoes, setSugestoes] = useState<PacienteSugestao[]>([]);
   const [sugestaoHorarioTexto, setSugestaoHorarioTexto] = useState('');
 
+  // "Múltiplos": mesmo tutor tem mais de um pet e nem sempre os dois vêm
+  // juntos, então em vez de buscar pelo nome do pet, busca-se pelo tutor e
+  // escolhe-se quais pets estão sendo atendidos nesta sessão.
+  const [modoMultiplos, setModoMultiplos] = useState(false);
+  const [buscaTutor, setBuscaTutor] = useState('');
+  const [sugestoesTutor, setSugestoesTutor] = useState<PacienteSugestao[]>([]);
+  const [pacientesMultiplos, setPacientesMultiplos] = useState<{ paciente: PacienteSugestao; valor: string }[]>([]);
+
   useFocusEffect(
     useCallback(() => {
       (async () => {
@@ -179,6 +187,28 @@ export default function ModalAtendimento() {
       cancelado = true;
     };
   }, [nomePaciente, atendimentoId]);
+
+  useEffect(() => {
+    if (atendimentoId || !modoMultiplos) return;
+    const termo = buscaTutor.trim();
+    if (termo.length < 2) {
+      setSugestoesTutor([]);
+      return;
+    }
+    let cancelado = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from('pacientes')
+        .select('id, nome, tutor, telefone, forma_pagamento_preferida, horario_preferido, endereco, atendido_em_residencia, clinica_id')
+        .ilike('tutor', `%${termo}%`)
+        .order('nome')
+        .limit(10);
+      if (!cancelado) setSugestoesTutor(rows ?? []);
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [buscaTutor, modoMultiplos, atendimentoId]);
 
   async function carregarPacote(pacienteId: string) {
     const { data } = await supabase
@@ -258,6 +288,64 @@ export default function ModalAtendimento() {
     setSugestoes([]);
   }
 
+  function alternarModoMultiplos() {
+    setModoMultiplos((atual) => !atual);
+    // Reseta a busca ao trocar de modo, pra não misturar seleção por nome do
+    // pet com seleção por tutor.
+    setNomePaciente('');
+    setPacienteVinculadoId(null);
+    setSugestoes([]);
+    setBuscaTutor('');
+    setSugestoesTutor([]);
+    setPacientesMultiplos([]);
+  }
+
+  async function alternarSelecaoMultiplo(item: PacienteSugestao) {
+    const jaSelecionado = pacientesMultiplos.some((p) => p.paciente.id === item.id);
+    if (jaSelecionado) {
+      setPacientesMultiplos((atual) => atual.filter((p) => p.paciente.id !== item.id));
+      return;
+    }
+
+    const eraOPrimeiro = pacientesMultiplos.length === 0;
+    setPacientesMultiplos((atual) => [...atual, { paciente: item, valor: '' }]);
+
+    // Clínica segue o cadastro do primeiro paciente selecionado, mesma lógica
+    // já usada na seleção única.
+    if (eraOPrimeiro) {
+      if (item.clinica_id) {
+        setClinicaId(item.clinica_id);
+        setModoParticular(false);
+      } else {
+        setClinicaId(null);
+        setModoParticular(true);
+      }
+    }
+
+    // Copia procedimento/valor da última sessão desse paciente, igual ao
+    // padrão já usado na seleção única — só o valor varia entre os pets.
+    const { data: ultimo } = await supabase
+      .from('atendimentos')
+      .select('procedimento, valor')
+      .eq('paciente_id', item.id)
+      .order('data', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (ultimo) {
+      if (eraOPrimeiro) aplicarProcedimento(ultimo.procedimento || '');
+      if (ultimo.valor) {
+        const valorFormatado = String(ultimo.valor).replace('.', ',');
+        setPacientesMultiplos((atual) =>
+          atual.map((p) => (p.paciente.id === item.id ? { ...p, valor: valorFormatado } : p))
+        );
+      }
+    }
+  }
+
+  function atualizarValorMultiplo(pacienteId: string, novoValor: string) {
+    setPacientesMultiplos((atual) => atual.map((p) => (p.paciente.id === pacienteId ? { ...p, valor: novoValor } : p)));
+  }
+
   function aoAlterarHora(d: Date) {
     const novaHora = dateParaHora(d);
     setHora(novaHora);
@@ -299,7 +387,97 @@ export default function ModalAtendimento() {
     });
   }
 
+  async function salvarMultiplos() {
+    if (pacientesMultiplos.length === 0 || (!clinicaId && !modoParticular) || !hora.trim() || !horaFim.trim()) {
+      alertar('Selecione ao menos um paciente, a clínica (ou particular) e o horário.');
+      return;
+    }
+    if (paraMinutos(horaFim) <= paraMinutos(hora)) {
+      alertar('O horário de término deve ser depois do horário de início.');
+      return;
+    }
+
+    const clinicaFinal = modoParticular ? null : clinicaId;
+    const intervalo = Math.max(1, parseInt(intervaloRecorrencia, 10) || 1);
+    const quantidadeOcorrencias = Math.max(1, parseInt(qtdOcorrencias, 10) || 1);
+    const todasDatas = repetir
+      ? gerarOcorrenciasRecorrencia({
+          dataBase: data,
+          unidade: frequenciaRecorrencia,
+          intervalo,
+          diasSemana: frequenciaRecorrencia === 'semana' ? Array.from(diasSemanaRecorrencia) : undefined,
+          fim: fimRecorrencia,
+          quantidadeOcorrencias,
+          dataFim: fimRecorrencia === 'data' ? dataFimRecorrencia : undefined,
+        })
+      : [data];
+    const datasAdicionais = todasDatas.filter((d) => d !== data);
+    const datasFinal = repetir && fimRecorrencia === 'apos' ? datasAdicionais.slice(0, quantidadeOcorrencias - 1) : datasAdicionais;
+
+    for (const { paciente, valor: valorPaciente } of pacientesMultiplos) {
+      const valorNumerico = valorPaciente ? parseFloat(valorPaciente.replace(',', '.')) : 0;
+      const recorrenciaId = repetir ? crypto.randomUUID() : null;
+
+      const { error: erroBase } = await supabase.from('atendimentos').insert({
+        paciente_id: paciente.id,
+        clinica_id: clinicaFinal,
+        data,
+        hora: hora.trim(),
+        hora_fim: horaFim.trim(),
+        procedimento: procedimento.trim(),
+        valor: valorNumerico,
+        forma_pagamento: formaPagamento.trim(),
+        status,
+        pago,
+        data_pagamento: pago ? hoje() : null,
+        recorrencia_id: recorrenciaId,
+      });
+      if (erroBase) {
+        alertar('Erro ao salvar atendimento', `${paciente.nome}: ${erroBase.message}`);
+        continue;
+      }
+
+      const { data: pacoteExistente } = await supabase
+        .from('pacotes')
+        .select('id, sessoes_usadas')
+        .eq('paciente_id', paciente.id)
+        .maybeSingle();
+
+      let sessoesAdicionais = 0;
+      for (const proximaData of datasFinal) {
+        const { error: erroRepeticao } = await supabase.from('atendimentos').insert({
+          paciente_id: paciente.id,
+          clinica_id: clinicaFinal,
+          data: proximaData,
+          hora: hora.trim(),
+          hora_fim: horaFim.trim(),
+          procedimento: procedimento.trim(),
+          valor: valorNumerico,
+          forma_pagamento: formaPagamento.trim(),
+          status: 'agendado',
+          pago: false,
+          data_pagamento: null,
+          recorrencia_id: recorrenciaId,
+        });
+        if (!erroRepeticao) sessoesAdicionais += 1;
+      }
+
+      if (pacoteExistente) {
+        await supabase
+          .from('pacotes')
+          .update({ sessoes_usadas: pacoteExistente.sessoes_usadas + 1 + sessoesAdicionais })
+          .eq('id', pacoteExistente.id);
+      }
+    }
+
+    router.back();
+  }
+
   async function salvar() {
+    if (modoMultiplos) {
+      await salvarMultiplos();
+      return;
+    }
     if (!nomePaciente.trim() || (!clinicaId && !modoParticular) || !hora.trim() || !horaFim.trim()) {
       alertar('Preencha ao menos: paciente, clínica (ou particular), horário de início e de término.');
       return;
@@ -512,36 +690,102 @@ export default function ModalAtendimento() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
       >
         <ScrollView contentContainerStyle={{ padding: theme.spacing.lg }} keyboardShouldPersistTaps="handled">
-          <Text style={styles.label}>Paciente</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Nome do animal"
-            placeholderTextColor={theme.colors.textTertiary}
-            value={nomePaciente}
-            onChangeText={aoDigitarNomePaciente}
-          />
-          {sugestoes.length > 0 && (
-            <View style={styles.sugestoesContainer}>
-              {sugestoes.map((item) => (
-                <TouchableOpacity key={item.id} style={styles.sugestaoItem} onPress={() => selecionarSugestao(item)}>
-                  <Ionicons name="time-outline" size={16} color={theme.colors.textSecondary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.sugestaoNome}>{item.nome}</Text>
-                    <Text style={styles.sugestaoDetalhe}>Tutor: {item.tutor || 'Não informado'}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-          {!!pacote && (
-            <Text style={[styles.dica, pacotePrecisaRenovar && styles.dicaAlerta]}>
-              📦 Pacote: {pacote.sessoes_usadas} de {pacote.total_sessoes} sessões usadas
-              {pacotePrecisaRenovar ? ' · hora de renovar' : ''}
-            </Text>
+          {!atendimentoId && (
+            <TouchableOpacity style={styles.linhaMultiplos} onPress={alternarModoMultiplos} activeOpacity={0.7}>
+              <View style={[styles.checkbox, styles.checkboxPequeno, modoMultiplos && styles.checkboxAtivo]}>
+                {modoMultiplos && <Text style={styles.checkboxMarcaPequena}>✓</Text>}
+              </View>
+              <Text style={styles.multiplosTexto}>Múltiplos pacientes do mesmo tutor</Text>
+            </TouchableOpacity>
           )}
 
-          <Text style={styles.label}>Tutor</Text>
-          <TextInput style={styles.input} placeholder="Nome do tutor" placeholderTextColor={theme.colors.textTertiary} value={tutor} onChangeText={setTutor} />
+          {modoMultiplos ? (
+            <>
+              <Text style={styles.label}>Tutor</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Nome do tutor"
+                placeholderTextColor={theme.colors.textTertiary}
+                value={buscaTutor}
+                onChangeText={setBuscaTutor}
+              />
+              {sugestoesTutor.length > 0 && (
+                <View style={styles.sugestoesContainer}>
+                  {sugestoesTutor.map((item) => {
+                    const selecionado = pacientesMultiplos.some((p) => p.paciente.id === item.id);
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.sugestaoItem}
+                        onPress={() => alternarSelecaoMultiplo(item)}
+                      >
+                        <View style={[styles.checkbox, selecionado && styles.checkboxAtivo]}>
+                          {selecionado && <Text style={styles.checkboxMarca}>✓</Text>}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sugestaoNome}>{item.nome}</Text>
+                          <Text style={styles.sugestaoDetalhe}>Tutor: {item.tutor || 'Não informado'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {pacientesMultiplos.map(({ paciente, valor: valorPaciente }) => (
+                <View key={paciente.id} style={styles.pacienteMultiploCard}>
+                  <View style={styles.pacienteMultiploCabecalho}>
+                    <Text style={[styles.sugestaoNome, { flex: 1 }]}>{paciente.nome}</Text>
+                    <TouchableOpacity onPress={() => alternarSelecaoMultiplo(paciente)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.label}>Valor (R$)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="150.00"
+                    placeholderTextColor={theme.colors.textTertiary}
+                    keyboardType="decimal-pad"
+                    value={valorPaciente}
+                    onChangeText={(texto) => atualizarValorMultiplo(paciente.id, texto)}
+                  />
+                </View>
+              ))}
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Paciente</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Nome do animal"
+                placeholderTextColor={theme.colors.textTertiary}
+                value={nomePaciente}
+                onChangeText={aoDigitarNomePaciente}
+              />
+              {sugestoes.length > 0 && (
+                <View style={styles.sugestoesContainer}>
+                  {sugestoes.map((item) => (
+                    <TouchableOpacity key={item.id} style={styles.sugestaoItem} onPress={() => selecionarSugestao(item)}>
+                      <Ionicons name="time-outline" size={16} color={theme.colors.textSecondary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.sugestaoNome}>{item.nome}</Text>
+                        <Text style={styles.sugestaoDetalhe}>Tutor: {item.tutor || 'Não informado'}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {!!pacote && (
+                <Text style={[styles.dica, pacotePrecisaRenovar && styles.dicaAlerta]}>
+                  📦 Pacote: {pacote.sessoes_usadas} de {pacote.total_sessoes} sessões usadas
+                  {pacotePrecisaRenovar ? ' · hora de renovar' : ''}
+                </Text>
+              )}
+
+              <Text style={styles.label}>Tutor</Text>
+              <TextInput style={styles.input} placeholder="Nome do tutor" placeholderTextColor={theme.colors.textTertiary} value={tutor} onChangeText={setTutor} />
+            </>
+          )}
 
           <Text style={styles.label}>Clínica</Text>
           <View style={styles.chipsContainer}>
@@ -789,8 +1033,12 @@ export default function ModalAtendimento() {
             ))}
           </View>
 
-          <Text style={styles.label}>Valor (R$)</Text>
-          <TextInput style={styles.input} placeholder="150.00" placeholderTextColor={theme.colors.textTertiary} keyboardType="decimal-pad" value={valor} onChangeText={setValor} />
+          {!modoMultiplos && (
+            <>
+              <Text style={styles.label}>Valor (R$)</Text>
+              <TextInput style={styles.input} placeholder="150.00" placeholderTextColor={theme.colors.textTertiary} keyboardType="decimal-pad" value={valor} onChangeText={setValor} />
+            </>
+          )}
 
           <Text style={styles.label}>Forma de pagamento</Text>
           <View style={styles.chipsContainer}>
@@ -914,6 +1162,19 @@ const styles = StyleSheet.create({
   },
   checkboxAtivo: { backgroundColor: theme.colors.success, borderColor: theme.colors.success },
   checkboxMarca: { color: '#fff', fontFamily: theme.font.bold, fontSize: 13 },
+  linhaMultiplos: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  checkboxPequeno: { width: 18, height: 18, borderRadius: 4 },
+  checkboxMarcaPequena: { color: '#fff', fontFamily: theme.font.bold, fontSize: 11 },
+  multiplosTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.regular, fontSize: 13 },
+  pacienteMultiploCard: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.divider,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  pacienteMultiploCabecalho: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   botaoSalvar: { backgroundColor: theme.colors.primary, padding: 15, borderRadius: theme.radius.md, alignItems: 'center', marginTop: 28 },
   botaoTexto: { color: '#fff', fontFamily: theme.font.medium, fontSize: 15 },
   botaoExcluir: { padding: 15, borderRadius: theme.radius.md, alignItems: 'center', marginTop: 12 },
