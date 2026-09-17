@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { AgendaTimeline, type DiaTimeline, type EventoTimeline } from '@/components/agenda-timeline';
 import { EventoPopup, type EventoPopupInfo } from '@/components/evento-popup';
+import { ExcluirRecorrenciaModal } from '@/components/excluir-recorrencia-modal';
 import { SwipePager } from '@/components/swipe-pager';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
@@ -49,6 +50,7 @@ type Atendimento = {
   clinica_nome: string | null;
   clinica_cor: string | null;
   clinica_endereco: string | null;
+  recorrencia_id: string | null;
 };
 
 function somarDias(iso: string, delta: number) {
@@ -101,6 +103,12 @@ export default function AgendaScreen() {
   const [semanaInicio, setSemanaInicio] = useState(inicioDaSemana(hoje()));
   const [diaSelecionado, setDiaSelecionado] = useState(hoje());
   const [eventoSelecionado, setEventoSelecionado] = useState<EventoPopupInfo | null>(null);
+  const [confirmarExclusaoRecorrente, setConfirmarExclusaoRecorrente] = useState<{
+    id: string;
+    recorrenciaId: string;
+    pacienteId: string;
+    data: string;
+  } | null>(null);
   const [desfazer, setDesfazer] = useState<{ mensagem: string; aoDesfazer: () => void } | null>(null);
   const desfazerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref sempre atualizada com a lista mais recente, para os callbacks abaixo
@@ -115,7 +123,7 @@ export default function AgendaScreen() {
     const { data: rows } = await supabase
       .from('atendimentos')
       .select(
-        'id, paciente_id, clinica_id, data, hora, hora_fim, procedimento, status, pago, pacientes(nome, tutor, endereco, atendido_em_residencia), clinicas(nome, cor, endereco)'
+        'id, paciente_id, clinica_id, data, hora, hora_fim, procedimento, status, pago, recorrencia_id, pacientes(nome, tutor, endereco, atendido_em_residencia), clinicas(nome, cor, endereco)'
       )
       .order('hora');
 
@@ -259,38 +267,66 @@ export default function AgendaScreen() {
     carregarDados();
   }, [carregarDados]);
 
-  const excluirAtendimento = useCallback((id: string) => {
-    setEventoSelecionado(null);
-    alertar('Excluir atendimento', 'Tem certeza que deseja excluir este atendimento?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Excluir',
-        style: 'destructive',
-        onPress: async () => {
-          const atendimento = atendimentosRef.current.find((a) => a.id === id);
-          const { error } = await supabase.from('atendimentos').delete().eq('id', id);
-          if (error) {
-            alertar('Erro ao excluir atendimento', error.message);
-            return;
-          }
-          if (atendimento?.paciente_id) {
-            const { data: pacoteExistente } = await supabase
-              .from('pacotes')
-              .select('id, sessoes_usadas')
-              .eq('paciente_id', atendimento.paciente_id)
-              .maybeSingle();
-            if (pacoteExistente) {
-              await supabase
-                .from('pacotes')
-                .update({ sessoes_usadas: Math.max(0, pacoteExistente.sessoes_usadas - 1) })
-                .eq('id', pacoteExistente.id);
-            }
-          }
-          carregarDados();
-        },
-      },
-    ]);
+  const excluirIds = useCallback(async (ids: string[], pacienteId: string | null) => {
+    const { error } = await supabase.from('atendimentos').delete().in('id', ids);
+    if (error) {
+      alertar('Erro ao excluir atendimento', error.message);
+      return;
+    }
+    if (pacienteId) {
+      const { data: pacoteExistente } = await supabase
+        .from('pacotes')
+        .select('id, sessoes_usadas')
+        .eq('paciente_id', pacienteId)
+        .maybeSingle();
+      if (pacoteExistente) {
+        await supabase
+          .from('pacotes')
+          .update({ sessoes_usadas: Math.max(0, pacoteExistente.sessoes_usadas - ids.length) })
+          .eq('id', pacoteExistente.id);
+      }
+    }
+    carregarDados();
   }, [carregarDados]);
+
+  const excluirSerieRecorrente = useCallback(
+    async (recorrenciaId: string, pacienteId: string | null, apartirDe: string | null) => {
+      let consulta = supabase.from('atendimentos').select('id').eq('recorrencia_id', recorrenciaId);
+      if (apartirDe) consulta = consulta.gte('data', apartirDe);
+      const { data: linhas, error } = await consulta;
+      if (error) {
+        alertar('Erro ao excluir atendimentos', error.message);
+        return;
+      }
+      const ids = (linhas ?? []).map((l) => l.id);
+      if (ids.length > 0) await excluirIds(ids, pacienteId);
+    },
+    [excluirIds]
+  );
+
+  const excluirAtendimento = useCallback(
+    (id: string) => {
+      setEventoSelecionado(null);
+      const atendimento = atendimentosRef.current.find((a) => a.id === id);
+      if (!atendimento) return;
+
+      if (atendimento.recorrencia_id) {
+        setConfirmarExclusaoRecorrente({
+          id,
+          recorrenciaId: atendimento.recorrencia_id,
+          pacienteId: atendimento.paciente_id,
+          data: atendimento.data,
+        });
+        return;
+      }
+
+      alertar('Excluir atendimento', 'Tem certeza que deseja excluir este atendimento?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Excluir', style: 'destructive', onPress: () => excluirIds([id], atendimento.paciente_id) },
+      ]);
+    },
+    [excluirIds]
+  );
 
   const eventosPorDia = useMemo(() => {
     const mapa: Record<string, EventoTimeline[]> = {};
@@ -460,6 +496,29 @@ export default function AgendaScreen() {
         }}
         onDuplicar={duplicarAtendimento}
         onExcluir={excluirAtendimento}
+      />
+
+      <ExcluirRecorrenciaModal
+        visivel={!!confirmarExclusaoRecorrente}
+        onFechar={() => setConfirmarExclusaoRecorrente(null)}
+        onExcluirEste={() => {
+          if (!confirmarExclusaoRecorrente) return;
+          const { id, pacienteId } = confirmarExclusaoRecorrente;
+          setConfirmarExclusaoRecorrente(null);
+          excluirIds([id], pacienteId);
+        }}
+        onExcluirSeguintes={() => {
+          if (!confirmarExclusaoRecorrente) return;
+          const { recorrenciaId, pacienteId, data } = confirmarExclusaoRecorrente;
+          setConfirmarExclusaoRecorrente(null);
+          excluirSerieRecorrente(recorrenciaId, pacienteId, data);
+        }}
+        onExcluirTodos={() => {
+          if (!confirmarExclusaoRecorrente) return;
+          const { recorrenciaId, pacienteId } = confirmarExclusaoRecorrente;
+          setConfirmarExclusaoRecorrente(null);
+          excluirSerieRecorrente(recorrenciaId, pacienteId, null);
+        }}
       />
 
       {desfazer && (

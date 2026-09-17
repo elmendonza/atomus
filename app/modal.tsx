@@ -370,9 +370,11 @@ export default function ModalAtendimento() {
       data_pagamento: dataPagamento,
     };
 
+    const recorrenciaId = !atendimentoId && repetir ? crypto.randomUUID() : null;
+
     const { error: erroAtendimento } = atendimentoId
       ? await supabase.from('atendimentos').update(dadosAtendimento).eq('id', atendimentoId)
-      : await supabase.from('atendimentos').insert(dadosAtendimento);
+      : await supabase.from('atendimentos').insert({ ...dadosAtendimento, recorrencia_id: recorrenciaId });
 
     if (erroAtendimento) {
       alertar('Erro ao salvar atendimento', erroAtendimento.message);
@@ -412,6 +414,7 @@ export default function ModalAtendimento() {
         for (const proximaData of datasFinal) {
           const { error: erroRepeticao } = await supabase.from('atendimentos').insert({
             ...dadosAtendimento,
+            recorrencia_id: recorrenciaId,
             data: proximaData,
             status: 'agendado',
             pago: false,
