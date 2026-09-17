@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,10 @@ import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
 import { hoje, isoParaDate, dateParaIso } from '@/src/utils/tempo';
+import { formatarMoeda } from '@/src/utils/formato';
 import { alertar } from '@/src/utils/alerta';
+
+const ID_PARTICULAR = 'particular';
 
 const MESES_COMPLETO = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -26,10 +29,14 @@ type Atendimento = {
   hora: string;
   procedimento: string;
   status: string;
+  valor: number;
   paciente_nome: string;
+  clinica_id: string | null;
   clinica_nome: string | null;
   clinica_cor: string | null;
 };
+
+type Clinica = { id: string; nome: string; cor: string };
 
 function inicioDoMes(mes: string) {
   return `${mes}-01`;
@@ -52,17 +59,27 @@ function formatarDataCurta(dataStr: string) {
   return `${dia}/${mes}`;
 }
 
+function formatarDataCompleta(dataStr: string) {
+  const [ano, mes, dia] = dataStr.split('-');
+  return `${dia}/${mes}/${ano}`;
+}
+
 export default function ExtratoMensalScreen() {
   const router = useRouter();
   const [mes, setMes] = useState(hoje().slice(0, 7));
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
+  const [clinicas, setClinicas] = useState<Clinica[]>([]);
+  const [filtroClinica, setFiltroClinica] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
+    const { data: cli } = await supabase.from('clinicas').select('id, nome, cor').order('nome');
+    setClinicas(cli ?? []);
+
     const { data, error } = await supabase
       .from('atendimentos')
-      .select('id, data, hora, procedimento, status, pacientes(nome), clinicas(nome, cor)')
+      .select('id, data, hora, procedimento, status, valor, clinica_id, pacientes(nome), clinicas(nome, cor)')
       .gte('data', inicioDoMes(mes))
       .lte('data', fimDoMes(mes))
       .order('data')
@@ -88,9 +105,96 @@ export default function ExtratoMensalScreen() {
     }, [carregar])
   );
 
+  const atendimentosFiltrados = atendimentos.filter((item) => {
+    if (filtroClinica === null) return true;
+    if (filtroClinica === ID_PARTICULAR) return item.clinica_id === null;
+    return item.clinica_id === filtroClinica;
+  });
+
   const [ano, mesNum] = mes.split('-').map(Number);
   const tituloMes = `${MESES_COMPLETO[mesNum - 1]} ${ano}`;
-  const realizados = atendimentos.filter((a) => a.status === 'realizado').length;
+  const realizados = atendimentosFiltrados.filter((a) => a.status === 'realizado').length;
+  const nomeClinicaFiltro =
+    filtroClinica === null
+      ? 'Todas as clínicas'
+      : filtroClinica === ID_PARTICULAR
+        ? 'Particular'
+        : clinicas.find((c) => c.id === filtroClinica)?.nome ?? '';
+
+  function baixarPdf() {
+    if (Platform.OS !== 'web') return;
+    const itensParaPdf = atendimentosFiltrados.filter((a) => a.status !== 'cancelado');
+    const linhas = itensParaPdf
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.paciente_nome}</td>
+            <td>${formatarDataCompleta(item.data)}</td>
+            <td>${item.clinica_nome || 'Particular'}</td>
+            <td class="valor">${formatarMoeda(item.valor || 0)}</td>
+          </tr>`
+      )
+      .join('');
+    const total = itensParaPdf.reduce((soma, item) => soma + (item.valor || 0), 0);
+
+    const html = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Extrato - ${tituloMes}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: -apple-system, Helvetica, Arial, sans-serif; padding: 32px; color: #222; }
+            .cabecalho {
+              display: flex; align-items: flex-end; justify-content: space-between;
+              border-bottom: 2px solid #1A73E8; padding-bottom: 16px; margin-bottom: 24px;
+            }
+            .cabecalho h1 { font-size: 20px; margin: 0; }
+            .cabecalho p { margin: 4px 0 0; color: #666; font-size: 13px; }
+            .cabecalho .direita { text-align: right; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+            th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+            th { color: #666; font-size: 11px; text-transform: uppercase; }
+            td.valor, th.valor { text-align: right; }
+            tfoot td { font-weight: bold; border-top: 2px solid #222; border-bottom: none; padding-top: 10px; }
+            @media print { body { padding: 0 24px; } }
+          </style>
+        </head>
+        <body>
+          <div class="cabecalho">
+            <div>
+              <h1>Raphaela</h1>
+              <p>Extrato de atendimentos</p>
+            </div>
+            <div class="direita">
+              <p><strong>${tituloMes}</strong></p>
+              <p>${nomeClinicaFiltro}</p>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Paciente</th><th>Data</th><th>Local</th><th class="valor">Valor</th></tr>
+            </thead>
+            <tbody>${linhas || '<tr><td colspan="4">Nenhum atendimento neste período.</td></tr>'}</tbody>
+            <tfoot>
+              <tr><td colspan="3">Total</td><td class="valor">${formatarMoeda(total)}</td></tr>
+            </tfoot>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const janela = window.open('', '_blank');
+    if (!janela) {
+      alertar('Não foi possível abrir a janela de impressão. Verifique se o navegador bloqueou pop-ups.');
+      return;
+    }
+    janela.document.write(html);
+    janela.document.close();
+    janela.focus();
+    setTimeout(() => janela.print(), 250);
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -122,10 +226,40 @@ export default function ExtratoMensalScreen() {
         />
       </View>
 
+      <View style={styles.filtroClinicaContainer}>
+        <TouchableOpacity
+          style={[styles.clinicaChip, filtroClinica === null && styles.clinicaChipAtivoNeutro]}
+          onPress={() => setFiltroClinica(null)}
+        >
+          <Text style={[styles.clinicaChipTexto, filtroClinica === null && styles.clinicaChipTextoAtivoNeutro]}>Todas</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.clinicaChip,
+            { borderColor: COR_PARTICULAR },
+            filtroClinica === ID_PARTICULAR && { backgroundColor: COR_PARTICULAR },
+          ]}
+          onPress={() => setFiltroClinica(ID_PARTICULAR)}
+        >
+          <Text style={[styles.clinicaChipTexto, filtroClinica === ID_PARTICULAR && styles.clinicaChipTextoAtivo]}>
+            Particular
+          </Text>
+        </TouchableOpacity>
+        {clinicas.map((c) => (
+          <TouchableOpacity
+            key={c.id}
+            style={[styles.clinicaChip, { borderColor: c.cor }, filtroClinica === c.id && { backgroundColor: c.cor }]}
+            onPress={() => setFiltroClinica(c.id)}
+          >
+            <Text style={[styles.clinicaChipTexto, filtroClinica === c.id && styles.clinicaChipTextoAtivo]}>{c.nome}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={styles.resumoContainer}>
         <View style={styles.resumoCard}>
           <Text style={styles.resumoLabel}>Total no mês</Text>
-          <Text style={styles.resumoValor}>{atendimentos.length}</Text>
+          <Text style={styles.resumoValor}>{atendimentosFiltrados.length}</Text>
         </View>
         <View style={styles.resumoCard}>
           <Text style={[styles.resumoLabel, { color: theme.colors.success }]}>Realizados</Text>
@@ -133,8 +267,13 @@ export default function ExtratoMensalScreen() {
         </View>
       </View>
 
+      <TouchableOpacity style={styles.botaoPdf} onPress={baixarPdf} activeOpacity={0.7}>
+        <Ionicons name="download-outline" size={16} color={theme.colors.primary} />
+        <Text style={styles.botaoPdfTexto}>Baixar PDF do resumo</Text>
+      </TouchableOpacity>
+
       <FlatList
-        data={atendimentos}
+        data={atendimentosFiltrados}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingBottom: 40, paddingTop: 4 }}
         ListEmptyComponent={
@@ -197,6 +336,38 @@ const styles = StyleSheet.create({
   },
   navTitulo: { color: theme.colors.text, fontSize: 16, fontFamily: theme.font.medium, minWidth: 160, textAlign: 'center' },
   escolherMesContainer: { paddingHorizontal: theme.spacing.md, marginBottom: theme.spacing.sm },
+  filtroClinicaContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+  },
+  clinicaChip: {
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.full,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  clinicaChipAtivoNeutro: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  clinicaChipTexto: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 12 },
+  clinicaChipTextoAtivo: { color: '#fff' },
+  clinicaChipTextoAtivoNeutro: { color: theme.colors.primary },
+  botaoPdf: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    paddingVertical: 10,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primaryLight,
+    backgroundColor: theme.colors.surface,
+  },
+  botaoPdfTexto: { color: theme.colors.primary, fontFamily: theme.font.medium, fontSize: 13 },
   resumoContainer: {
     flexDirection: 'row',
     paddingHorizontal: theme.spacing.md,
