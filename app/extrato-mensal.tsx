@@ -9,6 +9,7 @@ import { theme, COR_PARTICULAR } from '@/src/theme';
 import { hoje, isoParaDate, dateParaIso } from '@/src/utils/tempo';
 import { formatarMoeda } from '@/src/utils/formato';
 import { alertar } from '@/src/utils/alerta';
+import { LOGO_RAPHAELA_PNG_BASE64 } from '@/src/assets/logo-raphaela';
 
 const ID_PARTICULAR = 'particular';
 
@@ -145,14 +146,14 @@ export default function ExtratoMensalScreen() {
           <title>Extrato - ${tituloMes}</title>
           <style>
             * { box-sizing: border-box; }
-            body { font-family: -apple-system, Helvetica, Arial, sans-serif; padding: 32px; color: #222; }
+            html { color-scheme: light; }
+            body { font-family: -apple-system, Helvetica, Arial, sans-serif; padding: 32px; color: #222; background: #fff; }
             .cabecalho {
-              display: flex; align-items: flex-end; justify-content: space-between;
-              border-bottom: 2px solid #1A73E8; padding-bottom: 16px; margin-bottom: 24px;
+              text-align: center;
+              border-bottom: 2px solid #eee; padding-bottom: 16px; margin-bottom: 24px;
             }
-            .cabecalho h1 { font-size: 20px; margin: 0; }
-            .cabecalho p { margin: 4px 0 0; color: #666; font-size: 13px; }
-            .cabecalho .direita { text-align: right; }
+            .cabecalho img { display: block; max-width: 220px; margin: 0 auto 10px; }
+            .cabecalho p { margin: 2px 0 0; color: #666; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; margin-top: 8px; }
             th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
             th { color: #666; font-size: 11px; text-transform: uppercase; }
@@ -163,14 +164,8 @@ export default function ExtratoMensalScreen() {
         </head>
         <body>
           <div class="cabecalho">
-            <div>
-              <h1>Raphaela</h1>
-              <p>Extrato de atendimentos</p>
-            </div>
-            <div class="direita">
-              <p><strong>${tituloMes}</strong></p>
-              <p>${nomeClinicaFiltro}</p>
-            </div>
+            <img src="data:image/png;base64,${LOGO_RAPHAELA_PNG_BASE64}" alt="Raphaela Scarpa" />
+            <p><strong>${tituloMes}</strong> · ${nomeClinicaFiltro}</p>
           </div>
           <table>
             <thead>
