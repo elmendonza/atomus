@@ -12,6 +12,7 @@ import { alertar } from '@/src/utils/alerta';
 import { LOGO_RAPHAELA_PNG_BASE64 } from '@/src/assets/logo-raphaela';
 
 const ID_PARTICULAR = 'particular';
+const TAXA_MAQUININHA_PARTICULAR = 2; // % descontado pela maquininha em cartão de crédito de clientes particulares
 
 const MESES_COMPLETO = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -31,13 +32,17 @@ type Atendimento = {
   procedimento: string;
   status: string;
   valor: number;
+  pago: boolean;
+  forma_pagamento: string | null;
   paciente_nome: string;
   clinica_id: string | null;
   clinica_nome: string | null;
   clinica_cor: string | null;
 };
 
-type Clinica = { id: string; nome: string; cor: string };
+type Clinica = { id: string; nome: string; cor: string; percentual: number };
+
+type TipoValor = 'bruto' | 'liquido';
 
 function inicioDoMes(mes: string) {
   return `${mes}-01`;
@@ -71,16 +76,17 @@ export default function ExtratoMensalScreen() {
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
   const [clinicas, setClinicas] = useState<Clinica[]>([]);
   const [filtroClinica, setFiltroClinica] = useState<string | null>(null);
+  const [tipoValor, setTipoValor] = useState<TipoValor>('bruto');
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const { data: cli } = await supabase.from('clinicas').select('id, nome, cor').order('nome');
+    const { data: cli } = await supabase.from('clinicas').select('id, nome, cor, percentual').order('nome');
     setClinicas(cli ?? []);
 
     const { data, error } = await supabase
       .from('atendimentos')
-      .select('id, data, hora, procedimento, status, valor, clinica_id, pacientes(nome), clinicas(nome, cor)')
+      .select('id, data, hora, procedimento, status, valor, pago, forma_pagamento, clinica_id, pacientes(nome), clinicas(nome, cor)')
       .gte('data', inicioDoMes(mes))
       .lte('data', fimDoMes(mes))
       .order('data')
@@ -112,9 +118,25 @@ export default function ExtratoMensalScreen() {
     return item.clinica_id === filtroClinica;
   });
 
+  // Líquido = valor menos a taxa da maquininha (só incide em particular pago
+  // no cartão de crédito) e multiplicado pelo percentual que a clínica repassa
+  // — mesma conta usada no Dashboard, pra bater com o que já é mostrado lá.
+  function valorLiquido(item: Atendimento) {
+    const percentual = item.clinica_id === null ? 100 : clinicas.find((c) => c.id === item.clinica_id)?.percentual ?? 100;
+    const ehCartaoCredito = item.forma_pagamento === 'Cartão de crédito';
+    const taxaMaquininha = item.clinica_id === null && ehCartaoCredito ? (item.valor || 0) * (TAXA_MAQUININHA_PARTICULAR / 100) : 0;
+    return ((item.valor || 0) - taxaMaquininha) * (percentual / 100);
+  }
+
+  function valorExibido(item: Atendimento) {
+    return tipoValor === 'bruto' ? item.valor || 0 : valorLiquido(item);
+  }
+
   const [ano, mesNum] = mes.split('-').map(Number);
   const tituloMes = `${MESES_COMPLETO[mesNum - 1]} ${ano}`;
   const realizados = atendimentosFiltrados.filter((a) => a.status === 'realizado').length;
+  const itensValidos = atendimentosFiltrados.filter((a) => a.status !== 'cancelado');
+  const totalValor = itensValidos.reduce((soma, item) => soma + valorExibido(item), 0);
   const nomeClinicaFiltro =
     filtroClinica === null
       ? 'Todas as clínicas'
@@ -124,19 +146,20 @@ export default function ExtratoMensalScreen() {
 
   function baixarPdf() {
     if (Platform.OS !== 'web') return;
-    const itensParaPdf = atendimentosFiltrados.filter((a) => a.status !== 'cancelado');
-    const linhas = itensParaPdf
+    // O PDF usa exatamente os mesmos itens e o mesmo filtro (clínica + bruto/líquido)
+    // que estão selecionados na tela — é o que vai ser enviado pra clínica como fechamento.
+    const linhas = itensValidos
       .map(
         (item) => `
           <tr>
             <td>${item.paciente_nome}</td>
             <td>${formatarDataCompleta(item.data)}</td>
             <td>${item.clinica_nome || 'Particular'}</td>
-            <td class="valor">${formatarMoeda(item.valor || 0)}</td>
+            <td class="valor">${formatarMoeda(valorExibido(item))}</td>
           </tr>`
       )
       .join('');
-    const total = itensParaPdf.reduce((soma, item) => soma + (item.valor || 0), 0);
+    const rotuloTipoValor = tipoValor === 'bruto' ? 'Valores brutos' : 'Valores líquidos';
 
     const html = `
       <!doctype html>
@@ -165,7 +188,7 @@ export default function ExtratoMensalScreen() {
         <body>
           <div class="cabecalho">
             <img src="data:image/png;base64,${LOGO_RAPHAELA_PNG_BASE64}" alt="Raphaela Scarpa" />
-            <p><strong>${tituloMes}</strong> · ${nomeClinicaFiltro}</p>
+            <p><strong>${tituloMes}</strong> · ${nomeClinicaFiltro} · ${rotuloTipoValor}</p>
           </div>
           <table>
             <thead>
@@ -173,7 +196,7 @@ export default function ExtratoMensalScreen() {
             </thead>
             <tbody>${linhas || '<tr><td colspan="4">Nenhum atendimento neste período.</td></tr>'}</tbody>
             <tfoot>
-              <tr><td colspan="3">Total</td><td class="valor">${formatarMoeda(total)}</td></tr>
+              <tr><td colspan="3">Total</td><td class="valor">${formatarMoeda(totalValor)}</td></tr>
             </tfoot>
           </table>
         </body>
@@ -251,6 +274,20 @@ export default function ExtratoMensalScreen() {
         ))}
       </View>
 
+      <View style={styles.segmentoValorContainer}>
+        {(['bruto', 'liquido'] as const).map((tipo) => (
+          <TouchableOpacity
+            key={tipo}
+            style={[styles.segmentoValorBotao, tipoValor === tipo && styles.segmentoValorBotaoAtivo]}
+            onPress={() => setTipoValor(tipo)}
+          >
+            <Text style={[styles.segmentoValorTexto, tipoValor === tipo && styles.segmentoValorTextoAtivo]}>
+              {tipo === 'bruto' ? 'Bruto' : 'Líquido'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={styles.resumoContainer}>
         <View style={styles.resumoCard}>
           <Text style={styles.resumoLabel}>Total no mês</Text>
@@ -259,6 +296,10 @@ export default function ExtratoMensalScreen() {
         <View style={styles.resumoCard}>
           <Text style={[styles.resumoLabel, { color: theme.colors.success }]}>Realizados</Text>
           <Text style={[styles.resumoValor, { color: theme.colors.success }]}>{realizados}</Text>
+        </View>
+        <View style={styles.resumoCard}>
+          <Text style={[styles.resumoLabel, { color: theme.colors.primary }]}>{tipoValor === 'bruto' ? 'Bruto' : 'Líquido'}</Text>
+          <Text style={[styles.resumoValor, { color: theme.colors.primary }]}>{formatarMoeda(totalValor)}</Text>
         </View>
       </View>
 
@@ -291,15 +332,18 @@ export default function ExtratoMensalScreen() {
                   {item.clinica_nome || 'Particular'} · {item.procedimento || 'Consulta'}
                 </Text>
               </View>
-              <Text
-                style={[
-                  styles.statusTexto,
-                  item.status === 'realizado' && { color: theme.colors.success },
-                  item.status === 'cancelado' && { color: theme.colors.danger },
-                ]}
-              >
-                {STATUS_LABEL[item.status] || item.status}
-              </Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.valorTexto}>{formatarMoeda(valorExibido(item))}</Text>
+                <Text
+                  style={[
+                    styles.statusTexto,
+                    item.status === 'realizado' && { color: theme.colors.success },
+                    item.status === 'cancelado' && { color: theme.colors.danger },
+                  ]}
+                >
+                  {STATUS_LABEL[item.status] || item.status}
+                </Text>
+              </View>
             </View>
           </View>
         )}
@@ -349,6 +393,19 @@ const styles = StyleSheet.create({
   clinicaChipTexto: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 12 },
   clinicaChipTextoAtivo: { color: '#fff' },
   clinicaChipTextoAtivoNeutro: { color: theme.colors.primary },
+  segmentoValorContainer: {
+    flexDirection: 'row',
+    marginHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: theme.radius.md,
+    padding: 4,
+    gap: 4,
+  },
+  segmentoValorBotao: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: theme.radius.sm },
+  segmentoValorBotaoAtivo: { backgroundColor: theme.colors.surface },
+  segmentoValorTexto: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.medium },
+  segmentoValorTextoAtivo: { color: theme.colors.primary },
   botaoPdf: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -376,7 +433,7 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
   },
   resumoLabel: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.regular, marginBottom: 4 },
-  resumoValor: { color: theme.colors.text, fontSize: 18, fontFamily: theme.font.bold },
+  resumoValor: { color: theme.colors.text, fontSize: 15, fontFamily: theme.font.bold },
   vazioContainer: { alignItems: 'center', marginTop: 60, gap: 10 },
   vazio: { color: theme.colors.textSecondary, fontSize: 14, fontFamily: theme.font.medium },
   card: {
@@ -402,5 +459,6 @@ const styles = StyleSheet.create({
   horaTexto: { color: theme.colors.textSecondary, fontFamily: theme.font.regular, fontSize: 12, marginTop: 1 },
   paciente: { color: theme.colors.text, fontSize: 15, fontFamily: theme.font.medium },
   detalhe: { color: theme.colors.textSecondary, fontSize: 13, fontFamily: theme.font.regular, marginTop: 2 },
-  statusTexto: { color: theme.colors.textTertiary, fontFamily: theme.font.medium, fontSize: 12 },
+  valorTexto: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 14 },
+  statusTexto: { color: theme.colors.textTertiary, fontFamily: theme.font.medium, fontSize: 12, marginTop: 2 },
 });
