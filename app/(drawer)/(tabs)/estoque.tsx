@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, Platform } from 'react-native';
+import { StyleSheet, View, Text, TextInput, FlatList, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,7 @@ import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
-import { CATEGORIAS_ESTOQUE } from '@/src/utils/categoriasEstoque';
+import { CATEGORIAS_ESTOQUE, normalizarNomeProduto } from '@/src/utils/categoriasEstoque';
 
 type Produto = {
   id: string;
@@ -25,6 +25,7 @@ const PRODUTOS_EXEMPLO = [
 ];
 
 const ID_ALERTA = 'alerta';
+const ID_BUSCA = 'busca';
 const COR_ALERTA = '#F2B880'; // laranja pastel, sempre usar tons pastéis em elementos de destaque
 
 const CATEGORIAS = [
@@ -42,6 +43,8 @@ export default function EstoqueScreen() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [carregado, setCarregado] = useState(false);
   const [categoriaAtiva, setCategoriaAtiva] = useState('geral');
+  const [modoBusca, setModoBusca] = useState(false);
+  const [textoBusca, setTextoBusca] = useState('');
 
   const carregar = useCallback(async () => {
     const { data, error } = await supabase
@@ -87,10 +90,20 @@ export default function EstoqueScreen() {
   }, [produtos]);
 
   const produtosFiltrados = useMemo(() => {
+    if (modoBusca) {
+      const termo = normalizarNomeProduto(textoBusca);
+      if (!termo) return produtos;
+      return produtos.filter((p) => normalizarNomeProduto(p.nome).includes(termo));
+    }
     if (categoriaAtiva === 'geral') return produtos;
     if (categoriaAtiva === ID_ALERTA) return produtos.filter(estoqueBaixo);
     return produtos.filter((p) => p.categoria === categoriaAtiva);
-  }, [produtos, categoriaAtiva]);
+  }, [produtos, categoriaAtiva, modoBusca, textoBusca]);
+
+  function alternarModoBusca() {
+    setModoBusca((atual) => !atual);
+    setTextoBusca('');
+  }
 
   const baixos = produtos.filter(estoqueBaixo).length;
 
@@ -146,7 +159,36 @@ export default function EstoqueScreen() {
             </TouchableOpacity>
           );
         })}
+
+        <TouchableOpacity
+          key={ID_BUSCA}
+          style={[styles.categoriaCard, modoBusca && styles.categoriaCardAtiva]}
+          activeOpacity={0.7}
+          onPress={alternarModoBusca}
+        >
+          <Ionicons name="search-outline" size={22} color={modoBusca ? theme.colors.primary : theme.colors.textSecondary} />
+          <Text style={[styles.categoriaLabel, modoBusca && styles.categoriaLabelAtiva]}>Buscar</Text>
+        </TouchableOpacity>
       </View>
+
+      {modoBusca && (
+        <View style={styles.buscaContainer}>
+          <Ionicons name="search" size={16} color={theme.colors.textSecondary} />
+          <TextInput
+            style={styles.buscaInput}
+            placeholder="Buscar produto pelo nome..."
+            placeholderTextColor={theme.colors.textTertiary}
+            value={textoBusca}
+            onChangeText={setTextoBusca}
+            autoFocus
+          />
+          {!!textoBusca && (
+            <TouchableOpacity onPress={() => setTextoBusca('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       <FlatList
         data={produtosFiltrados}
@@ -255,6 +297,20 @@ const styles = StyleSheet.create({
     color: theme.colors.textTertiary,
   },
   categoriaContagemAlerta: { color: COR_ALERTA },
+  buscaContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: theme.spacing.md,
+    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 8,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  buscaInput: { flex: 1, fontFamily: theme.font.regular, fontSize: 14, color: theme.colors.text },
   vazioContainer: { alignItems: 'center', paddingTop: theme.spacing.xl, gap: theme.spacing.xs },
   vazio: { fontFamily: theme.font.medium, fontSize: 15, color: theme.colors.textSecondary },
   vazioDica: { fontFamily: theme.font.regular, fontSize: 13, color: theme.colors.textTertiary },

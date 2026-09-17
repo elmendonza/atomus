@@ -609,7 +609,9 @@ export default function ModalAtendimento() {
       }
     }
 
-    if (telefone.trim()) {
+    // A confirmação por WhatsApp só faz sentido para um agendamento novo —
+    // ao editar um atendimento já existente, o tutor já foi avisado antes.
+    if (!atendimentoId && telefone.trim()) {
       alertar('Confirmação por WhatsApp', 'Deseja enviar a confirmação do agendamento pelo WhatsApp?', [
         { text: 'Não', style: 'cancel', onPress: () => router.back() },
         {

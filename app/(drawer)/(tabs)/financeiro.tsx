@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, Platform } from 'react-native';
+import { StyleSheet, View, Text, TextInput, FlatList, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
@@ -21,6 +21,7 @@ type Atendimento = {
   pago: boolean;
   data_pagamento: string | null;
   paciente_nome: string;
+  tutor: string;
   clinica_id: string | null;
   clinica_nome: string | null;
   clinica_cor: string | null;
@@ -107,6 +108,8 @@ export default function FinanceiroScreen() {
   const [dataInicio, setDataInicio] = useState(hoje());
   const [dataFim, setDataFim] = useState(hoje());
   const [categoriaAberta, setCategoriaAberta] = useState<CategoriaFiltro | null>(null);
+  const [buscaAberta, setBuscaAberta] = useState(false);
+  const [textoBusca, setTextoBusca] = useState('');
 
   const [despesas, setDespesas] = useState<Despesa[]>([]);
   const [despesasCarregadas, setDespesasCarregadas] = useState(false);
@@ -124,7 +127,7 @@ export default function FinanceiroScreen() {
       .from('atendimentos')
       .select(
         `id, data, hora, procedimento, valor, forma_pagamento, pago, data_pagamento, clinica_id,
-         pacientes(nome), clinicas(nome, cor)`
+         pacientes(nome, tutor), clinicas(nome, cor)`
       )
       .order('data', { ascending: false })
       .order('hora', { ascending: false });
@@ -136,6 +139,7 @@ export default function FinanceiroScreen() {
       (rows ?? []).map((r: any) => ({
         ...r,
         paciente_nome: r.pacientes?.nome ?? '',
+        tutor: r.pacientes?.tutor ?? '',
         clinica_nome: r.clinicas?.nome ?? null,
         clinica_cor: r.clinicas?.cor ?? null,
       }))
@@ -205,6 +209,10 @@ export default function FinanceiroScreen() {
     if (filtroStatus === 'pagos' && !item.pago) return false;
     if (filtroStatus === 'pendentes' && item.pago) return false;
     if (intervaloData && (item.data < intervaloData.inicio || item.data > intervaloData.fim)) return false;
+    const termo = textoBusca.trim().toLowerCase();
+    if (termo && !item.paciente_nome.toLowerCase().includes(termo) && !item.tutor.toLowerCase().includes(termo)) {
+      return false;
+    }
     return true;
   });
 
@@ -247,6 +255,11 @@ export default function FinanceiroScreen() {
     setCategoriaAberta((atual) => (atual === categoria ? null : categoria));
   }
 
+  function alternarBusca() {
+    setBuscaAberta((atual) => !atual);
+    setTextoBusca('');
+  }
+
   const listaClinicasComParticular = [...clinicas, { id: ID_PARTICULAR, nome: 'Particular', cor: COR_PARTICULAR }];
   const rotuloPeriodo = PERIODO_OPCOES.find((p) => p.chave === periodo)?.rotulo ?? 'Todo período';
   const rotuloStatus = STATUS_PAGAMENTO_OPCOES.find((s) => s.chave === filtroStatus)?.rotulo ?? 'Todos';
@@ -260,7 +273,26 @@ export default function FinanceiroScreen() {
       <View style={styles.header}>
         <DrawerMenuButton />
         <Text style={styles.headerTitulo}>Financeiro</Text>
+        {aba === 'entradas' && (
+          <TouchableOpacity onPress={alternarBusca} hitSlop={8} style={styles.botaoBusca}>
+            <Ionicons name={buscaAberta ? 'close' : 'search-outline'} size={18} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        )}
       </View>
+
+      {buscaAberta && (
+        <View style={styles.buscaContainer}>
+          <Ionicons name="search" size={14} color={theme.colors.textTertiary} />
+          <TextInput
+            style={styles.buscaInput}
+            placeholder="Buscar por paciente ou tutor..."
+            placeholderTextColor={theme.colors.textTertiary}
+            value={textoBusca}
+            onChangeText={setTextoBusca}
+            autoFocus
+          />
+        </View>
+      )}
 
       <View style={styles.segmentoContainer}>
         <TouchableOpacity
@@ -661,6 +693,19 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  botaoBusca: { marginLeft: 'auto', padding: 4 },
+  buscaContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 6,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  buscaInput: { flex: 1, fontFamily: theme.font.regular, fontSize: 13, color: theme.colors.text },
   segmentoContainer: {
     flexDirection: 'row',
     marginHorizontal: theme.spacing.md,
