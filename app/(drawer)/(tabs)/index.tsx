@@ -141,6 +141,25 @@ export default function AgendaScreen() {
       };
     });
 
+    // Atendimentos agendados cujo horário de término já passou viram "realizado"
+    // automaticamente — evita ficar com agendamentos antigos parados como
+    // "Agendado" para sempre, sem precisar marcar um por um.
+    const agora = new Date();
+    const idsParaRealizar = todosComCancelados
+      .filter((item) => item.status === 'agendado' && new Date(`${item.data}T${item.hora_fim}`) <= agora)
+      .map((item) => item.id);
+    if (idsParaRealizar.length > 0) {
+      const { error: erroAutoRealizar } = await supabase
+        .from('atendimentos')
+        .update({ status: 'realizado' })
+        .in('id', idsParaRealizar);
+      if (!erroAutoRealizar) {
+        todosComCancelados.forEach((item) => {
+          if (idsParaRealizar.includes(item.id)) item.status = 'realizado';
+        });
+      }
+    }
+
     // Cancelados ficam ocultos da agenda (libera o horário visualmente), mas o
     // registro permanece intacto no banco para um futuro relatório de cancelamentos.
     const todos = todosComCancelados.filter((item) => item.status !== 'cancelado');

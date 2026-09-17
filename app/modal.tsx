@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Linking,
+  StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Linking, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -111,6 +111,8 @@ export default function ModalAtendimento() {
   const [formaPagamento, setFormaPagamento] = useState('');
   const [status, setStatus] = useState<(typeof STATUS_OPCOES)[number]>('agendado');
   const [pago, setPago] = useState(false);
+  const [dataPagamento, setDataPagamento] = useState(hoje());
+  const opacidadePagamento = useRef(new Animated.Value(0)).current;
   const [carregado, setCarregado] = useState(!atendimentoId);
 
   const [sugestoes, setSugestoes] = useState<PacienteSugestao[]>([]);
@@ -134,7 +136,7 @@ export default function ModalAtendimento() {
           const { data: item } = await supabase
             .from('atendimentos')
             .select(
-              `data, hora, hora_fim, procedimento, valor, forma_pagamento, status, pago,
+              `data, hora, hora_fim, procedimento, valor, forma_pagamento, status, pago, data_pagamento,
                clinica_id, paciente_id, pacientes(nome, tutor, telefone, endereco, atendido_em_residencia)`
             )
             .eq('id', atendimentoId)
@@ -150,6 +152,7 @@ export default function ModalAtendimento() {
             setFormaPagamento(item.forma_pagamento || '');
             setStatus((item.status as any) || 'agendado');
             setPago(!!item.pago);
+            setDataPagamento(item.data_pagamento || hoje());
             setClinicaId(item.clinica_id);
             setModoParticular(item.clinica_id == null);
             setNomePaciente(paciente?.nome ?? '');
@@ -165,6 +168,22 @@ export default function ModalAtendimento() {
       })();
     }, [atendimentoId])
   );
+
+  // O bloco de pagamento (forma, checkbox, data) só existe quando o
+  // atendimento está "Realizado", e aparece suavemente conforme o status
+  // muda — sem animação enquanto os dados ainda estão carregando (edição de
+  // atendimento existente), só nas trocas feitas pelo usuário na sessão.
+  useEffect(() => {
+    if (!carregado) {
+      opacidadePagamento.setValue(status === 'realizado' ? 1 : 0);
+      return;
+    }
+    Animated.timing(opacidadePagamento, {
+      toValue: status === 'realizado' ? 1 : 0,
+      duration: 400,
+      useNativeDriver: false,
+    }).start();
+  }, [status, carregado, opacidadePagamento]);
 
   useEffect(() => {
     if (atendimentoId) return;
@@ -429,7 +448,7 @@ export default function ModalAtendimento() {
         forma_pagamento: formaPagamento.trim(),
         status,
         pago,
-        data_pagamento: pago ? hoje() : null,
+        data_pagamento: pago ? dataPagamento : null,
         recorrencia_id: recorrenciaId,
       });
       if (erroBase) {
@@ -531,7 +550,7 @@ export default function ModalAtendimento() {
     }
 
     const valorNumerico = valor ? parseFloat(valor.replace(',', '.')) : 0;
-    const dataPagamento = pago ? hoje() : null;
+    const dataPagamentoFinal = pago ? dataPagamento : null;
     const clinicaFinal = modoParticular ? null : clinicaId;
 
     const dadosAtendimento = {
@@ -545,7 +564,7 @@ export default function ModalAtendimento() {
       forma_pagamento: formaPagamento.trim(),
       status,
       pago,
-      data_pagamento: dataPagamento,
+      data_pagamento: dataPagamentoFinal,
     };
 
     const recorrenciaId = !atendimentoId && repetir ? crypto.randomUUID() : null;
@@ -1042,25 +1061,49 @@ export default function ModalAtendimento() {
             </>
           )}
 
-          <Text style={styles.label}>Forma de pagamento</Text>
-          <View style={styles.chipsContainer}>
-            {FORMAS_PAGAMENTO.map((f) => (
-              <TouchableOpacity
-                key={f}
-                style={[styles.statusChip, formaPagamento === f && styles.statusChipAtivo]}
-                onPress={() => setFormaPagamento(f)}
-              >
-                <Text style={[styles.statusChipTexto, formaPagamento === f && styles.chipTextoAtivo]}>{f}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {status === 'realizado' && (
+            <Animated.View
+              style={{
+                opacity: opacidadePagamento,
+                transform: [
+                  { translateY: opacidadePagamento.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+                ],
+              }}
+            >
+              <Text style={styles.label}>Forma de pagamento</Text>
+              <View style={styles.chipsContainer}>
+                {FORMAS_PAGAMENTO.map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[styles.statusChip, formaPagamento === f && styles.statusChipAtivo]}
+                    onPress={() => setFormaPagamento(f)}
+                  >
+                    <Text style={[styles.statusChipTexto, formaPagamento === f && styles.chipTextoAtivo]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-          <TouchableOpacity style={styles.linhaPago} onPress={() => setPago(!pago)} activeOpacity={0.7}>
-            <View style={[styles.checkbox, pago && styles.checkboxAtivo]}>
-              {pago && <Text style={styles.checkboxMarca}>✓</Text>}
-            </View>
-            <Text style={styles.label2}>Pagamento recebido</Text>
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.linhaPago} onPress={() => setPago(!pago)} activeOpacity={0.7}>
+                <View style={[styles.checkbox, pago && styles.checkboxAtivo]}>
+                  {pago && <Text style={styles.checkboxMarca}>✓</Text>}
+                </View>
+                <Text style={styles.label2}>Pagamento recebido</Text>
+              </TouchableOpacity>
+
+              {pago && (
+                <>
+                  <Text style={styles.label}>Data do pagamento</Text>
+                  <CampoDataHora
+                    valor={isoParaDate(dataPagamento)}
+                    modo="date"
+                    aoAlterar={(d) => setDataPagamento(dateParaIso(d))}
+                    textoExibido={formatarDataBR(dataPagamento)}
+                    icone="calendar-outline"
+                  />
+                </>
+              )}
+            </Animated.View>
+          )}
 
           <TouchableOpacity style={styles.botaoSalvar} onPress={salvar} activeOpacity={0.85}>
             <Text style={styles.botaoTexto}>{atendimentoId ? 'Salvar alterações' : 'Salvar atendimento'}</Text>
