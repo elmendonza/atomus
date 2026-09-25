@@ -14,6 +14,18 @@ const CicloS = 60; // todos os períodos abaixo dividem 60 s, então o loop não
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
+// Na web, o index.html mostra o mesmo logo animado (SVG) até o React montar. Lê o relógio dele AGORA (no carregamento do
+// módulo, antes de o React substituir o conteúdo) para continuar a animação do mesmo ponto, sem "pulo".
+const T0 = (() => {
+  try {
+    const el = typeof document !== 'undefined' ? (document.querySelector('.carregamento-inicial svg') as any) : null;
+    const s = el?.getCurrentTime?.();
+    return typeof s === 'number' && isFinite(s) ? s % CicloS : 0;
+  } catch {
+    return 0;
+  }
+})();
+
 const ORBITAS = [0, 90, 45, 135];
 // rot = ângulo da órbita | periodo = segundos por volta | fase = posição inicial (0..1)
 const BOLINHAS = [
@@ -37,10 +49,10 @@ function Bolinha({ t, rot, periodo, fase }: { t: SharedValue<number>; rot: numbe
 }
 
 export function LoadingScreen() {
-  const t = useSharedValue(0);
+  const t = useSharedValue(T0);
 
   useEffect(() => {
-    t.value = withRepeat(withTiming(CicloS, { duration: CicloS * 1000, easing: Easing.linear }), -1);
+    t.value = withRepeat(withTiming(T0 + CicloS, { duration: CicloS * 1000, easing: Easing.linear }), -1);
   }, [t]);
 
   return (
