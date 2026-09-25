@@ -12,6 +12,7 @@ const ITENS = [
   { route: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' as const },
   { route: 'clientes', label: 'Clientes', icon: 'people-outline' as const },
   { route: 'pacotes', label: 'Pacotes', icon: 'albums-outline' as const },
+  { route: 'pendentes', label: 'Pendentes', icon: 'wallet-outline' as const },
 ];
 
 export function CustomDrawerContent(props: DrawerContentComponentProps) {
