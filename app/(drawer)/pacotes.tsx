@@ -10,6 +10,7 @@ import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 import { formatarNumeroWhatsApp } from '@/src/utils/formato';
+import { buscarDatasPacote, montarMensagemRenovacao } from '@/src/utils/pacote';
 
 type Pacote = {
   id: string;
@@ -21,16 +22,6 @@ type Pacote = {
   paciente_tutor: string | null;
   paciente_telefone: string | null;
 };
-
-function montarMensagemRenovacao(nomePaciente: string, restantes: number) {
-  return `Olá, tudo bem? ✨🤍
-
-Passando para te avisar que estamos chegando às últimas sessões do pacotinho da ${nomePaciente}. No momento, faltam apenas ${restantes} ${restantes === 1 ? 'sessão' : 'sessões'} para finalizarmos esse pacote.
-
-Já quis te avisar com antecedência para conseguirmos nos organizar direitinho e, caso vocês queiram continuar com o acompanhamento, já deixarmos a próxima renovação programada.
-
-Se tiver qualquer dúvida sobre os pacotes pode me chamar, ok?!`;
-}
 
 function precisaRenovar(item: Pacote) {
   return item.total_sessoes > 0 && item.total_sessoes - item.sessoes_usadas <= item.minimo_renovacao;
@@ -113,14 +104,14 @@ export default function PacotesScreen() {
     carregar();
   }
 
-  function enviarMensagemRenovacao(item: Pacote) {
+  async function enviarMensagemRenovacao(item: Pacote) {
     if (!item.paciente_telefone) {
       alertar('Cadastre o telefone do tutor em Clientes para enviar a mensagem.');
       return;
     }
-    const restantes = Math.max(item.total_sessoes - item.sessoes_usadas, 0);
+    const { datas, algumaFutura } = await buscarDatasPacote(item.paciente_id, item.sessoes_usadas);
     const numero = formatarNumeroWhatsApp(item.paciente_telefone);
-    const mensagem = montarMensagemRenovacao(item.paciente_nome, restantes);
+    const mensagem = montarMensagemRenovacao(item.paciente_nome, datas, algumaFutura);
     Linking.openURL(`https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`);
   }
 

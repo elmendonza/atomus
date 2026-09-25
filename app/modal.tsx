@@ -15,6 +15,7 @@ import {
 } from '@/src/utils/tempo';
 import { alertar } from '@/src/utils/alerta';
 import { formatarNumeroWhatsApp } from '@/src/utils/formato';
+import { buscarDatasPacote, montarMensagemRenovacao } from '@/src/utils/pacote';
 
 type Clinica = { id: string; nome: string; cor: string; endereco: string | null };
 
@@ -97,6 +98,8 @@ export default function ModalAtendimento() {
   const [hora, setHora] = useState('');
   const [horaFim, setHoraFim] = useState('');
   const duracaoRef = useRef(DURACAO_PADRAO_MIN);
+  // Estado do pacote logo após criar um agendamento (usado para sugerir a mensagem de renovação).
+  const pacoteAposAgendar = useRef<{ pacienteId: string; total: number; usadas: number; minimo: number } | null>(null);
   const [repetir, setRepetir] = useState(false);
   const [frequenciaRecorrencia, setFrequenciaRecorrencia] = useState<UnidadeRecorrencia>('semana');
   const [intervaloRecorrencia, setIntervaloRecorrencia] = useState('1');
@@ -582,13 +585,14 @@ export default function ModalAtendimento() {
       // Novo agendamento: se o paciente tem pacote, já desconta uma sessão.
       const { data: pacoteExistente } = await supabase
         .from('pacotes')
-        .select('id, sessoes_usadas')
+        .select('id, sessoes_usadas, total_sessoes, minimo_renovacao')
         .eq('paciente_id', pacienteId)
         .maybeSingle();
+      let usadasFinal = pacoteExistente ? pacoteExistente.sessoes_usadas + 1 : 0;
       if (pacoteExistente) {
         await supabase
           .from('pacotes')
-          .update({ sessoes_usadas: pacoteExistente.sessoes_usadas + 1 })
+          .update({ sessoes_usadas: usadasFinal })
           .eq('id', pacoteExistente.id);
       }
 
@@ -620,30 +624,63 @@ export default function ModalAtendimento() {
           if (!erroRepeticao) sessoesAdicionais += 1;
         }
         if (pacoteExistente && sessoesAdicionais > 0) {
+          usadasFinal = pacoteExistente.sessoes_usadas + 1 + sessoesAdicionais;
           await supabase
             .from('pacotes')
-            .update({ sessoes_usadas: pacoteExistente.sessoes_usadas + 1 + sessoesAdicionais })
+            .update({ sessoes_usadas: usadasFinal })
             .eq('id', pacoteExistente.id);
         }
       }
+      pacoteAposAgendar.current = pacoteExistente
+        ? { pacienteId, total: pacoteExistente.total_sessoes, usadas: usadasFinal, minimo: pacoteExistente.minimo_renovacao }
+        : null;
     }
 
     // A confirmação por WhatsApp só faz sentido para um agendamento novo —
     // ao editar um atendimento já existente, o tutor já foi avisado antes.
     if (!atendimentoId && telefone.trim()) {
       alertar('Confirmação por WhatsApp', 'Deseja enviar a confirmação do agendamento pelo WhatsApp?', [
-        { text: 'Não', style: 'cancel', onPress: () => router.back() },
+        { text: 'Não', style: 'cancel', onPress: sugerirRenovacaoOuSair },
         {
           text: 'Sim',
           onPress: () => {
             enviarConfirmacaoWhatsApp();
-            router.back();
+            sugerirRenovacaoOuSair();
           },
         },
       ]);
     } else {
       router.back();
     }
+  }
+
+  // Se este agendamento levou o pacote ao limite de renovação (ou ao fim), sugere mandar a mensagem de renovação.
+  function sugerirRenovacaoOuSair() {
+    const p = pacoteAposAgendar.current;
+    if (!p || !telefone.trim() || p.total <= 0 || p.total - p.usadas > p.minimo) {
+      router.back();
+      return;
+    }
+    const restantes = Math.max(p.total - p.usadas, 0);
+    alertar(
+      'Renovação de pacote',
+      restantes === 0
+        ? 'Este foi o último agendamento do pacote. Deseja enviar a mensagem de renovação pelo WhatsApp?'
+        : `Faltam ${restantes} ${restantes === 1 ? 'sessão' : 'sessões'} para acabar o pacote. Deseja enviar a mensagem de renovação pelo WhatsApp?`,
+      [
+        { text: 'Agora não', style: 'cancel', onPress: () => router.back() },
+        {
+          text: 'Enviar',
+          onPress: async () => {
+            const { datas, algumaFutura } = await buscarDatasPacote(p.pacienteId, p.usadas);
+            const numero = formatarNumeroWhatsApp(telefone);
+            const mensagem = montarMensagemRenovacao(nomePaciente.trim(), datas, algumaFutura);
+            Linking.openURL(`https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`);
+            router.back();
+          },
+        },
+      ]
+    );
   }
 
   function enviarConfirmacaoWhatsApp() {
