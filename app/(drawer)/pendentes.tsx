@@ -7,7 +7,8 @@ import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
-import { formatarMoeda, formatarNumeroWhatsApp } from '@/src/utils/formato';
+import { formatarNumeroWhatsApp } from '@/src/utils/formato';
+import { useOcultarValores } from '@/src/utils/ocultar-valores';
 import { formatarDataBR, hoje } from '@/src/utils/tempo';
 import { montarMensagemCobranca } from '@/src/utils/cobranca';
 
@@ -21,6 +22,7 @@ type Grupo = { pacienteId: string; nome: string; tutor: string | null; telefone:
 const PASTEL = { vermelho: '#FBE3E1', vermelhoTexto: '#8A4B46', verde: '#DDF1E4', verdeTexto: '#2E6B45' };
 
 export default function PendentesScreen() {
+  const { oculto, alternar: alternarOcultar, moeda } = useOcultarValores();
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [clinicas, setClinicas] = useState<Clinica[]>([]);
   const [filtroClinica, setFiltroClinica] = useState<string | null>(null); // null = todas | ID_PARTICULAR | id da clínica
@@ -93,7 +95,7 @@ export default function PendentesScreen() {
   }
 
   function pagarUm(g: Grupo, a: Atend) {
-    alertar('Marcar como pago', `${g.nome} — ${formatarDataBR(a.data)} ${a.hora}${a.valor ? ` · ${formatarMoeda(Number(a.valor))}` : ''}`, [
+    alertar('Marcar como pago', `${g.nome} — ${formatarDataBR(a.data)} ${a.hora}${a.valor ? ` · ${moeda(Number(a.valor))}` : ''}`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Confirmar pago', onPress: () => gravarPago([a.id], 'Atendimento marcado como pago.') },
     ]);
@@ -101,7 +103,7 @@ export default function PendentesScreen() {
 
   function pagarTodos(g: Grupo) {
     const lista = g.atendimentos.map((a) => formatarDataBR(a.data)).join('\n');
-    alertar('Marcar tudo como pago', `${g.nome}: ${g.atendimentos.length} atendimento(s), total ${formatarMoeda(g.total)}\n\n${lista}`, [
+    alertar('Marcar tudo como pago', `${g.nome}: ${g.atendimentos.length} atendimento(s), total ${moeda(g.total)}\n\n${lista}`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Confirmar pago', onPress: () => gravarPago(g.atendimentos.map((a) => a.id), `${g.atendimentos.length} atendimento(s) marcado(s) como pago.`) },
     ]);
@@ -121,6 +123,9 @@ export default function PendentesScreen() {
       <View style={styles.header}>
         <DrawerMenuButton />
         <Text style={styles.headerTitulo}>Pendentes</Text>
+        <TouchableOpacity onPress={alternarOcultar} hitSlop={8} style={styles.botaoOlho} accessibilityLabel={oculto ? 'Mostrar valores' : 'Ocultar valores'}>
+          <Ionicons name={oculto ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -133,7 +138,7 @@ export default function PendentesScreen() {
           <View>
             <View style={styles.resumoCard}>
               <Text style={styles.resumoLabel}>Total a receber</Text>
-              <Text style={styles.resumoValor}>{formatarMoeda(totalGeral)}</Text>
+              <Text style={styles.resumoValor}>{moeda(totalGeral)}</Text>
               <Text style={styles.resumoDetalhe}>
                 {grupos.length} {grupos.length === 1 ? 'cliente' : 'clientes'} · {grupos.reduce((s, g) => s + g.atendimentos.length, 0)} atendimentos realizados sem pagamento
               </Text>
@@ -197,7 +202,7 @@ export default function PendentesScreen() {
                 <Text style={styles.detalhe}>Tutor: {g.tutor || 'Não informado'}</Text>
               </View>
               <View style={styles.totalBadge}>
-                <Text style={styles.totalTexto}>{formatarMoeda(g.total)}</Text>
+                <Text style={styles.totalTexto}>{moeda(g.total)}</Text>
               </View>
             </View>
 
@@ -207,7 +212,7 @@ export default function PendentesScreen() {
                   <Text style={styles.data}>{formatarDataBR(a.data)} · {a.hora}</Text>
                   {!!a.procedimento && <Text style={styles.detalhe}>{a.procedimento}</Text>}
                 </View>
-                <Text style={styles.valor}>{a.valor ? formatarMoeda(Number(a.valor)) : 'sem valor'}</Text>
+                <Text style={styles.valor}>{a.valor ? moeda(Number(a.valor)) : 'sem valor'}</Text>
                 <TouchableOpacity style={styles.botaoPagoPeq} onPress={() => pagarUm(g, a)} hitSlop={6}>
                   <Text style={styles.botaoPagoPeqTexto}>Pago</Text>
                 </TouchableOpacity>
@@ -236,6 +241,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.xs },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  botaoOlho: { marginLeft: 'auto', padding: 4 },
   filtroLinha: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: theme.spacing.md, marginTop: theme.spacing.sm },
   categoriaBotao: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderColor: theme.colors.border, borderRadius: theme.radius.full, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: theme.colors.surface },
   categoriaBotaoAtivo: { borderColor: theme.colors.primary },

@@ -8,7 +8,7 @@ import { CampoDataHora } from '@/components/campo-data-hora';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
 import { hoje, dateParaIso, isoParaDate, formatarDataBR } from '@/src/utils/tempo';
-import { formatarMoeda } from '@/src/utils/formato';
+import { useOcultarValores } from '@/src/utils/ocultar-valores';
 import { alertar } from '@/src/utils/alerta';
 
 type Atendimento = {
@@ -98,6 +98,7 @@ type CategoriaFiltro = 'periodo' | 'status' | 'clinica' | 'categoriaDespesa' | '
 
 export default function FinanceiroScreen() {
   const router = useRouter();
+  const { oculto, alternar: alternarOcultar, moeda } = useOcultarValores();
   const [aba, setAba] = useState<'entradas' | 'saidas'>('entradas');
 
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
@@ -273,11 +274,16 @@ export default function FinanceiroScreen() {
       <View style={styles.header}>
         <DrawerMenuButton />
         <Text style={styles.headerTitulo}>Financeiro</Text>
-        {aba === 'entradas' && (
-          <TouchableOpacity onPress={alternarBusca} hitSlop={8} style={styles.botaoBusca}>
-            <Ionicons name={buscaAberta ? 'close' : 'search-outline'} size={18} color={theme.colors.textSecondary} />
+        <View style={styles.acoesHeader}>
+          <TouchableOpacity onPress={alternarOcultar} hitSlop={8} style={styles.botaoOlho} accessibilityLabel={oculto ? 'Mostrar valores' : 'Ocultar valores'}>
+            <Ionicons name={oculto ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.colors.textSecondary} />
           </TouchableOpacity>
-        )}
+          {aba === 'entradas' && (
+            <TouchableOpacity onPress={alternarBusca} hitSlop={8} style={styles.botaoBusca}>
+              <Ionicons name={buscaAberta ? 'close' : 'search-outline'} size={18} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {buscaAberta && (
@@ -316,15 +322,15 @@ export default function FinanceiroScreen() {
           <View style={styles.resumoContainer}>
             <View style={styles.resumoCard}>
               <Text style={styles.resumoLabel}>Total</Text>
-              <Text style={styles.resumoValor}>{formatarMoeda(totalGeral)}</Text>
+              <Text style={styles.resumoValor}>{moeda(totalGeral)}</Text>
             </View>
             <View style={styles.resumoCard}>
               <Text style={[styles.resumoLabel, { color: theme.colors.success }]}>Recebido</Text>
-              <Text style={[styles.resumoValor, { color: theme.colors.success }]}>{formatarMoeda(totalPago)}</Text>
+              <Text style={[styles.resumoValor, { color: theme.colors.success }]}>{moeda(totalPago)}</Text>
             </View>
             <View style={styles.resumoCard}>
               <Text style={[styles.resumoLabel, { color: theme.colors.warning }]}>Pendente</Text>
-              <Text style={[styles.resumoValor, { color: theme.colors.warning }]}>{formatarMoeda(totalPendente)}</Text>
+              <Text style={[styles.resumoValor, { color: theme.colors.warning }]}>{moeda(totalPendente)}</Text>
             </View>
           </View>
 
@@ -475,7 +481,7 @@ export default function FinanceiroScreen() {
                     )}
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                    <Text style={styles.valor}>{formatarMoeda(item.valor || 0)}</Text>
+                    <Text style={styles.valor}>{moeda(item.valor || 0)}</Text>
                     <TouchableOpacity
                       style={[styles.badge, item.pago ? styles.badgePago : styles.badgePendente]}
                       onPress={() => alternarPago(item)}
@@ -496,11 +502,11 @@ export default function FinanceiroScreen() {
           <View style={styles.resumoContainer}>
             <View style={styles.resumoCard}>
               <Text style={[styles.resumoLabel, { color: theme.colors.danger }]}>Total</Text>
-              <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{formatarMoeda(totalFiltradoDespesas)}</Text>
+              <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{moeda(totalFiltradoDespesas)}</Text>
             </View>
             <View style={styles.resumoCard}>
               <Text style={styles.resumoLabel}>Gasto hoje</Text>
-              <Text style={styles.resumoValor}>{formatarMoeda(totalHojeDespesas)}</Text>
+              <Text style={styles.resumoValor}>{moeda(totalHojeDespesas)}</Text>
             </View>
           </View>
 
@@ -634,7 +640,7 @@ export default function FinanceiroScreen() {
               {principaisGastos.map(([categoria, valor]) => (
                 <View key={categoria} style={styles.principaisLinha}>
                   <Text style={styles.principaisCategoria}>{CATEGORIAS_DESPESA[categoria] || categoria}</Text>
-                  <Text style={styles.principaisValor}>{formatarMoeda(valor)}</Text>
+                  <Text style={styles.principaisValor}>{moeda(valor)}</Text>
                 </View>
               ))}
             </View>
@@ -664,10 +670,10 @@ export default function FinanceiroScreen() {
                       {CATEGORIAS_DESPESA[item.categoria] || item.categoria} · {formatarDataCurta(item.data_compra)} · {item.forma_pagamento || 'Não informado'}
                     </Text>
                     <Text style={styles.detalhe}>
-                      {item.quantidade} × {formatarMoeda(item.valor_unitario)}
+                      {item.quantidade} × {moeda(item.valor_unitario)}
                     </Text>
                   </View>
-                  <Text style={[styles.valor, { color: theme.colors.danger }]}>{formatarMoeda(item.valor_total)}</Text>
+                  <Text style={[styles.valor, { color: theme.colors.danger }]}>{moeda(item.valor_total)}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -693,7 +699,9 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
-  botaoBusca: { marginLeft: 'auto', padding: 4 },
+  acoesHeader: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  botaoOlho: { padding: 4 },
+  botaoBusca: { padding: 4 },
   buscaContainer: {
     flexDirection: 'row',
     alignItems: 'center',

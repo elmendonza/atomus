@@ -7,7 +7,7 @@ import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
 import { theme, COR_PARTICULAR } from '@/src/theme';
 import { dateParaIso, hoje, isoParaDate, formatarDataBR } from '@/src/utils/tempo';
-import { formatarMoeda } from '@/src/utils/formato';
+import { useOcultarValores } from '@/src/utils/ocultar-valores';
 
 const DIAS_LIMITE_RESGATE = 30;
 const TAXA_MAQUININHA_PARTICULAR = 2; // % descontado pela maquininha em cartão de crédito de clientes particulares
@@ -78,6 +78,7 @@ function variacao(atual: number, anterior: number) {
 }
 
 export default function DashboardScreen() {
+  const { oculto, alternar: alternarOcultar, moeda } = useOcultarValores();
   const [clinicas, setClinicas] = useState<Clinica[]>([]);
   const [atendimentos, setAtendimentos] = useState<Atendimento[]>([]);
   const [despesas, setDespesas] = useState<Despesa[]>([]);
@@ -294,6 +295,9 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <DrawerMenuButton />
         <Text style={styles.headerTitulo}>Dashboard</Text>
+        <TouchableOpacity onPress={alternarOcultar} hitSlop={8} style={styles.botaoOlho} accessibilityLabel={oculto ? 'Mostrar valores' : 'Ocultar valores'}>
+          <Ionicons name={oculto ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.seletorMesContainer}>
@@ -318,21 +322,21 @@ export default function DashboardScreen() {
               <Text style={[styles.resumoLabel, { color: theme.colors.success }]}>Entradas</Text>
               <VariacaoBadge valor={resumoMes.variacaoEntradas} />
             </View>
-            <Text style={[styles.resumoValor, { color: theme.colors.success }]}>{formatarMoeda(resumoMes.entradas)}</Text>
+            <Text style={[styles.resumoValor, { color: theme.colors.success }]}>{moeda(resumoMes.entradas)}</Text>
           </View>
           <View style={styles.resumoCard}>
             <View style={styles.resumoCabecalho}>
               <Text style={[styles.resumoLabel, { color: theme.colors.danger }]}>Saídas</Text>
               <VariacaoBadge valor={resumoMes.variacaoSaidas} inverso />
             </View>
-            <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{formatarMoeda(resumoMes.saidas)}</Text>
+            <Text style={[styles.resumoValor, { color: theme.colors.danger }]}>{moeda(resumoMes.saidas)}</Text>
           </View>
           <View style={styles.resumoCard}>
             <View style={styles.resumoCabecalho}>
               <Text style={[styles.resumoLabel, { color: theme.colors.primary }]}>Saldo</Text>
               <VariacaoBadge valor={resumoMes.variacaoSaldo} />
             </View>
-            <Text style={[styles.resumoValor, { color: theme.colors.primary }]}>{formatarMoeda(resumoMes.saldo)}</Text>
+            <Text style={[styles.resumoValor, { color: theme.colors.primary }]}>{moeda(resumoMes.saldo)}</Text>
           </View>
         </View>
 
@@ -342,7 +346,7 @@ export default function DashboardScreen() {
             <Text style={styles.indicadorLabel}>Atendimentos no mês</Text>
           </View>
           <View style={styles.indicadorItem}>
-            <Text style={styles.indicadorValor}>{formatarMoeda(indicadoresMes.ticketMedio)}</Text>
+            <Text style={styles.indicadorValor}>{moeda(indicadoresMes.ticketMedio)}</Text>
             <Text style={styles.indicadorLabel}>Ticket médio</Text>
           </View>
           <View style={styles.indicadorItem}>
@@ -368,20 +372,20 @@ export default function DashboardScreen() {
               <View style={styles.metricasLinha}>
                 <View style={styles.metrica}>
                   <Text style={styles.metricaLabel}>Faturado</Text>
-                  <Text style={styles.metricaValor}>{formatarMoeda(faturado)}</Text>
+                  <Text style={styles.metricaValor}>{moeda(faturado)}</Text>
                 </View>
                 <View style={styles.metrica}>
                   <Text style={[styles.metricaLabel, { color: theme.colors.success }]}>Recebido</Text>
-                  <Text style={[styles.metricaValor, { color: theme.colors.success }]}>{formatarMoeda(recebido)}</Text>
+                  <Text style={[styles.metricaValor, { color: theme.colors.success }]}>{moeda(recebido)}</Text>
                 </View>
                 <View style={styles.metrica}>
                   <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Líquido</Text>
-                  <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(liquido)}</Text>
+                  <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{moeda(liquido)}</Text>
                 </View>
               </View>
               {taxaMaquininha > 0 && (
                 <Text style={styles.taxaMaquininhaTexto}>
-                  Taxa maquininha ({TAXA_MAQUININHA_PARTICULAR}% cartão de crédito): -{formatarMoeda(taxaMaquininha)}
+                  Taxa maquininha ({TAXA_MAQUININHA_PARTICULAR}% cartão de crédito): -{moeda(taxaMaquininha)}
                 </Text>
               )}
             </View>
@@ -411,7 +415,7 @@ export default function DashboardScreen() {
                   </View>
                   <View style={styles.metrica}>
                     <Text style={[styles.metricaLabel, { color: theme.colors.primary }]}>Ticket médio líquido</Text>
-                    <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{formatarMoeda(ticketMedioLiquido)}</Text>
+                    <Text style={[styles.metricaValor, { color: theme.colors.primary }]}>{moeda(ticketMedioLiquido)}</Text>
                   </View>
                 </View>
               )}
@@ -432,7 +436,7 @@ export default function DashboardScreen() {
               top.map((servico, index) => (
                 <View key={servico.nome} style={[styles.linhaServico, index > 0 && styles.linhaComTopo]}>
                   <Text style={styles.servicoNome}>{servico.nome}</Text>
-                  <Text style={styles.servicoDetalhe}>{servico.qtd}x · {formatarMoeda(servico.total)}</Text>
+                  <Text style={styles.servicoDetalhe}>{servico.qtd}x · {moeda(servico.total)}</Text>
                 </View>
               ))
             )}
@@ -455,7 +459,7 @@ export default function DashboardScreen() {
                     <View style={[styles.barraPreenchida, { width: `${Math.round(item.proporcao * 100)}%` }]} />
                   </View>
                 </View>
-                <Text style={styles.categoriaValor}>{formatarMoeda(item.total)}</Text>
+                <Text style={styles.categoriaValor}>{moeda(item.total)}</Text>
               </View>
             ))}
           </View>
@@ -474,7 +478,7 @@ export default function DashboardScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.clienteNome}>{item.nome}</Text>
                   <Text style={styles.clienteDetalhe}>
-                    {item.qtdComprada} comprada(s) · {formatarMoeda(item.totalGasto)} no total
+                    {item.qtdComprada} comprada(s) · {moeda(item.totalGasto)} no total
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
@@ -511,7 +515,7 @@ export default function DashboardScreen() {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.clienteVisitas}>{cliente.visitas}x</Text>
-                  <Text style={styles.clienteDetalhe}>{formatarMoeda(cliente.total)}</Text>
+                  <Text style={styles.clienteDetalhe}>{moeda(cliente.total)}</Text>
                 </View>
               </View>
             ))}
@@ -586,6 +590,7 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  botaoOlho: { marginLeft: 'auto', padding: 4 },
   seletorMesContainer: {
     flexDirection: 'row',
     alignItems: 'center',
