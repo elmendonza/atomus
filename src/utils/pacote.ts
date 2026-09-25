@@ -29,3 +29,18 @@ Passando para avisar que estamos chegando às últimas sessões do pacotinho da 
 
 Se tiver qualquer dúvida sobre os pacotes, pode me chamar, tá bom?! 🤍✨`;
 }
+
+export type AtendimentoPacote = { id: string; data: string; hora: string; status: string; pago: boolean };
+
+// Atendimentos que compõem o pacote (mesmo critério das datas da mensagem: os últimos `sessoesUsadas` não cancelados).
+export async function buscarAtendimentosPacote(pacienteId: string, sessoesUsadas: number): Promise<AtendimentoPacote[]> {
+  if (sessoesUsadas <= 0) return [];
+  const { data } = await supabase
+    .from('atendimentos')
+    .select('id, data, hora, status, pago')
+    .eq('paciente_id', pacienteId)
+    .neq('status', 'cancelado')
+    .order('data', { ascending: false })
+    .limit(sessoesUsadas);
+  return ((data ?? []) as AtendimentoPacote[]).reverse();
+}

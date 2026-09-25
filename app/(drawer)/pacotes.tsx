@@ -10,7 +10,8 @@ import { supabase } from '@/src/lib/supabase';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 import { formatarNumeroWhatsApp } from '@/src/utils/formato';
-import { buscarDatasPacote, montarMensagemRenovacao } from '@/src/utils/pacote';
+import { buscarAtendimentosPacote, buscarDatasPacote, montarMensagemRenovacao } from '@/src/utils/pacote';
+import { formatarDataBR, hoje } from '@/src/utils/tempo';
 
 type Pacote = {
   id: string;
@@ -113,6 +114,38 @@ export default function PacotesScreen() {
     const numero = formatarNumeroWhatsApp(item.paciente_telefone);
     const mensagem = montarMensagemRenovacao(item.paciente_nome, datas, algumaFutura);
     Linking.openURL(`https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`);
+  }
+
+  // Pacote pago: marca como pagos os atendimentos REALIZADOS do pacote que ainda estão pendentes (pede confirmação com a lista).
+  async function marcarPago(item: Pacote) {
+    const todos = await buscarAtendimentosPacote(item.paciente_id, item.sessoes_usadas);
+    const pendentes = todos.filter((a) => a.status === 'realizado' && !a.pago);
+    if (pendentes.length === 0) {
+      alertar('Pacote pago', todos.length === 0 ? 'Não há atendimentos neste pacote.' : 'Todos os atendimentos realizados deste pacote já estão pagos.');
+      return;
+    }
+    const lista = pendentes.map((a) => `${formatarDataBR(a.data)} ${a.hora}`).join('\n');
+    alertar(
+      'Marcar pacote como pago',
+      `${item.paciente_nome}: ${pendentes.length} ${pendentes.length === 1 ? 'atendimento realizado será marcado' : 'atendimentos realizados serão marcados'} como pago(s):\n\n${lista}`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar pago',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('atendimentos')
+              .update({ pago: true, data_pagamento: hoje() })
+              .in('id', pendentes.map((a) => a.id));
+            if (error) {
+              alertar('Erro ao marcar como pago', error.message);
+              return;
+            }
+            alertar('Pacote pago', `${pendentes.length} ${pendentes.length === 1 ? 'atendimento marcado' : 'atendimentos marcados'} como pago.`);
+          },
+        },
+      ]
+    );
   }
 
   function confirmarRemocao(item: Pacote) {
@@ -228,6 +261,10 @@ export default function PacotesScreen() {
                   <TouchableOpacity onPress={() => enviarMensagemRenovacao(item)} hitSlop={8} style={styles.linhaWhatsapp}>
                     <Ionicons name="logo-whatsapp" size={14} color={theme.colors.success} />
                     <Text style={styles.whatsapp}>Mensagem</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => marcarPago(item)} hitSlop={8} style={styles.linhaWhatsapp}>
+                    <Ionicons name="cash-outline" size={14} color={theme.colors.success} />
+                    <Text style={styles.whatsapp}>Pago</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => renovar(item)} hitSlop={8}>
                     <Text style={styles.renovar}>Renovar</Text>
