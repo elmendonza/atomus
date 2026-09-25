@@ -46,8 +46,8 @@
         font-size: 16px !important;
       }
 
-      /* Tela de carregamento mostrada até o React montar: logo do Atomus com as bolinhas girando (SVG animado,
-         idêntico ao components/loading-screen.tsx, que assume a animação sem "pulo"). */
+      /* Logo do Atomus animado só com transforms CSS (roda fora do thread do JS, então não engasga enquanto o app carrega).
+         Mesma estrutura do components/atomus-orbitas.web.tsx, que assume a animação sem "pulo". */
       .carregamento-inicial {
         position: absolute;
         inset: 0;
@@ -55,6 +55,11 @@
         align-items: center;
         justify-content: center;
         background: #ffffff;
+      }
+      @keyframes orb-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
     </style>
   </head>
@@ -67,20 +72,8 @@
     <!-- O React substitui esse conteúdo assim que monta. -->
     <div id="root">
       <div class="carregamento-inicial">
-        <svg width="260" height="260" viewBox="0 0 260 260" role="img" aria-label="Carregando Atomus">
-        <g transform="translate(130,130)">
-          <g transform="rotate(0)"><ellipse rx="105" ry="37" fill="none" stroke="#1c1c1e" stroke-width="4" /></g>
-          <g transform="rotate(90)"><ellipse rx="105" ry="37" fill="none" stroke="#1c1c1e" stroke-width="4" /></g>
-          <g transform="rotate(45)"><ellipse rx="105" ry="37" fill="none" stroke="#1c1c1e" stroke-width="4" /></g>
-          <g transform="rotate(135)"><ellipse rx="105" ry="37" fill="none" stroke="#1c1c1e" stroke-width="4" /></g>
-          <g transform="rotate(0)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="4s" begin="-1.0s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-          <g transform="rotate(90)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="5s" begin="-3.0s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-          <g transform="rotate(45)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="6s" begin="-0.6s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-          <g transform="rotate(45)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="6s" begin="-3.6s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-          <g transform="rotate(135)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="5s" begin="-1.75s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-          <g transform="rotate(135)"><circle r="6.5" fill="#1c1c1e"><animateMotion dur="5s" begin="-4.25s" repeatCount="indefinite" path="M 105,0 A 105,37 0 1,1 -105,0 A 105,37 0 1,1 105,0 Z" /></circle></g>
-        </g>
-        </svg>
+        <div style="position:relative;width:260px;height:260px" role="img" aria-label="Carregando Atomus"><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(0deg)"><div style="position:absolute;left:-105px;top:-37px;width:210px;height:74px;box-sizing:border-box;border:4px solid #1c1c1e;border-radius:50%"></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(90deg)"><div style="position:absolute;left:-105px;top:-37px;width:210px;height:74px;box-sizing:border-box;border:4px solid #1c1c1e;border-radius:50%"></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(45deg)"><div style="position:absolute;left:-105px;top:-37px;width:210px;height:74px;box-sizing:border-box;border:4px solid #1c1c1e;border-radius:50%"></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(135deg)"><div style="position:absolute;left:-105px;top:-37px;width:210px;height:74px;box-sizing:border-box;border:4px solid #1c1c1e;border-radius:50%"></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(0deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 4s linear infinite;animation-delay:-1.0s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 4s linear infinite reverse;animation-delay:-1.0s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(90deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite;animation-delay:-3.0s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite reverse;animation-delay:-3.0s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(45deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 6s linear infinite;animation-delay:-0.6s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 6s linear infinite reverse;animation-delay:-0.6s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(45deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 6s linear infinite;animation-delay:-3.6s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 6s linear infinite reverse;animation-delay:-3.6s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(135deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite;animation-delay:-1.75s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite reverse;animation-delay:-1.75s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div><div style="position:absolute;left:130px;top:130px;width:0;height:0;transform:rotate(135deg)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform:scaleY(0.35238)"><div style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite;animation-delay:-4.25s"><div style="position:absolute;left:105px;top:0;width:0;height:0;transform-origin:0 0;animation:orb-spin 5s linear infinite reverse;animation-delay:-4.25s"><div style="position:absolute;left:-6.5px;top:-6.5px;width:13px;height:13px;border-radius:50%;background:#1c1c1e;transform:scaleY(2.83784)"></div></div></div></div></div></div>
+        <script>window.__orbT0 = performance.now();</script>
       </div>
     </div>
     </body>
