@@ -5,7 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerMenuButton } from '@/components/drawer-menu-button';
 import { supabase } from '@/src/lib/supabase';
-import { theme } from '@/src/theme';
+import { theme, COR_PARTICULAR } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
 import { formatarMoeda, formatarNumeroWhatsApp } from '@/src/utils/formato';
 import { formatarDataBR, hoje } from '@/src/utils/tempo';
@@ -13,45 +13,60 @@ import { montarMensagemCobranca } from '@/src/utils/cobranca';
 
 // Pendentes: atendimentos REALIZADOS ainda não pagos, agrupados por paciente (pet), para a cobrança.
 type Atend = { id: string; data: string; hora: string; procedimento: string | null; valor: number | null };
+type Linha = Atend & { pacienteId: string; nome: string; tutor: string | null; telefone: string | null; clinicaId: string | null };
+type Clinica = { id: string; nome: string; cor: string };
+const ID_PARTICULAR = 'particular';
 type Grupo = { pacienteId: string; nome: string; tutor: string | null; telefone: string | null; atendimentos: Atend[]; total: number };
 
 const PASTEL = { vermelho: '#FBE3E1', vermelhoTexto: '#8A4B46', verde: '#DDF1E4', verdeTexto: '#2E6B45' };
 
 export default function PendentesScreen() {
-  const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [clinicas, setClinicas] = useState<Clinica[]>([]);
+  const [filtroClinica, setFiltroClinica] = useState<string | null>(null); // null = todas | ID_PARTICULAR | id da clínica
+  const [filtroAberto, setFiltroAberto] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [busca, setBusca] = useState('');
 
   const carregar = useCallback(async () => {
     setCarregando(true);
-    const { data, error } = await supabase
-      .from('atendimentos')
-      .select('id, data, hora, procedimento, valor, paciente_id, pacientes(nome, tutor, telefone)')
-      .eq('status', 'realizado')
-      .eq('pago', false)
-      .order('data', { ascending: true })
-      .order('hora', { ascending: true });
+    const [{ data: cli }, { data, error }] = await Promise.all([
+      supabase.from('clinicas').select('id, nome, cor').order('nome'),
+      supabase
+        .from('atendimentos')
+        .select('id, data, hora, procedimento, valor, paciente_id, clinica_id, pacientes(nome, tutor, telefone)')
+        .eq('status', 'realizado')
+        .eq('pago', false)
+        .order('data', { ascending: true })
+        .order('hora', { ascending: true }),
+    ]);
     setCarregando(false);
     if (error) {
       alertar('Erro ao carregar pendentes', error.message);
       return;
     }
+    setClinicas((cli ?? []) as Clinica[]);
+    setLinhas(
+      ((data ?? []) as any[]).map((r) => ({
+        id: r.id, data: r.data, hora: r.hora, procedimento: r.procedimento, valor: r.valor,
+        pacienteId: r.paciente_id, clinicaId: r.clinica_id ?? null,
+        nome: r.pacientes?.nome ?? '', tutor: r.pacientes?.tutor ?? null, telefone: r.pacientes?.telefone ?? null,
+      }))
+    );
+  }, []);
+
+  // Agrupa por paciente já com o filtro de clínica aplicado (o total e a cobrança seguem só os atendimentos filtrados).
+  const grupos = useMemo(() => {
     const mapa = new Map<string, Grupo>();
-    for (const r of (data ?? []) as any[]) {
-      const g: Grupo = mapa.get(r.paciente_id) ?? {
-        pacienteId: r.paciente_id,
-        nome: r.pacientes?.nome ?? '',
-        tutor: r.pacientes?.tutor ?? null,
-        telefone: r.pacientes?.telefone ?? null,
-        atendimentos: [],
-        total: 0,
-      };
+    for (const r of linhas) {
+      if (filtroClinica === ID_PARTICULAR ? r.clinicaId !== null : filtroClinica !== null && r.clinicaId !== filtroClinica) continue;
+      const g: Grupo = mapa.get(r.pacienteId) ?? { pacienteId: r.pacienteId, nome: r.nome, tutor: r.tutor, telefone: r.telefone, atendimentos: [], total: 0 };
       g.atendimentos.push({ id: r.id, data: r.data, hora: r.hora, procedimento: r.procedimento, valor: r.valor });
       g.total += Number(r.valor) || 0;
-      mapa.set(r.paciente_id, g);
+      mapa.set(r.pacienteId, g);
     }
-    setGrupos([...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome)));
-  }, []);
+    return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [linhas, filtroClinica]);
 
   useFocusEffect(
     useCallback(() => {
@@ -64,6 +79,8 @@ export default function PendentesScreen() {
     return t ? grupos.filter((g) => g.nome.toLowerCase().includes(t) || (g.tutor ?? '').toLowerCase().includes(t)) : grupos;
   }, [grupos, busca]);
   const totalGeral = grupos.reduce((s, g) => s + g.total, 0);
+  const listaClinicas = [...clinicas, { id: ID_PARTICULAR, nome: 'Particular', cor: COR_PARTICULAR }];
+  const rotuloClinica = filtroClinica === null ? 'Todas' : (listaClinicas.find((c) => c.id === filtroClinica)?.nome ?? 'Todas');
 
   async function gravarPago(ids: string[], resumo: string) {
     const { error } = await supabase.from('atendimentos').update({ pago: true, data_pagamento: hoje() }).in('id', ids);
@@ -121,6 +138,39 @@ export default function PendentesScreen() {
                 {grupos.length} {grupos.length === 1 ? 'cliente' : 'clientes'} · {grupos.reduce((s, g) => s + g.atendimentos.length, 0)} atendimentos realizados sem pagamento
               </Text>
             </View>
+            <View style={styles.filtroLinha}>
+              <TouchableOpacity
+                style={[styles.categoriaBotao, filtroAberto && styles.categoriaBotaoAtivo]}
+                onPress={() => setFiltroAberto((v) => !v)}
+                activeOpacity={0.5}
+              >
+                <Text style={styles.categoriaLabel}>Clínica: {rotuloClinica}</Text>
+                <Ionicons name={filtroAberto ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            {filtroAberto && (
+              <View style={styles.opcoesBox}>
+                <View style={styles.chipsContainer}>
+                  <TouchableOpacity
+                    style={[styles.opcaoChip, filtroClinica === null && styles.opcaoChipAtivo]}
+                    onPress={() => { setFiltroClinica(null); setFiltroAberto(false); }}
+                    activeOpacity={0.5}
+                  >
+                    <Text style={[styles.opcaoChipTexto, filtroClinica === null && styles.opcaoChipTextoAtivo]}>Todas</Text>
+                  </TouchableOpacity>
+                  {listaClinicas.map((c) => (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.opcaoChip, { borderColor: c.cor }, filtroClinica === c.id && { backgroundColor: c.cor, borderColor: c.cor }]}
+                      onPress={() => { setFiltroClinica(c.id); setFiltroAberto(false); }}
+                      activeOpacity={0.5}
+                    >
+                      <Text style={[styles.opcaoChipTexto, filtroClinica === c.id && styles.opcaoChipTextoAtivo]}>{c.nome}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
             <View style={styles.buscaWrap}>
               <Ionicons name="search-outline" size={18} color={theme.colors.textTertiary} />
               <TextInput
@@ -135,8 +185,8 @@ export default function PendentesScreen() {
         }
         ListEmptyComponent={
           <View style={styles.vazioContainer}>
-            <Text style={styles.vazio}>{grupos.length === 0 ? 'Nenhum pagamento pendente 🎉' : 'Nenhum resultado para a busca'}</Text>
-            {grupos.length === 0 && <Text style={styles.vazioDica}>Atendimentos realizados e ainda não pagos aparecem aqui.</Text>}
+            <Text style={styles.vazio}>{linhas.length === 0 ? 'Nenhum pagamento pendente 🎉' : 'Nenhum resultado para o filtro ou a busca'}</Text>
+            {linhas.length === 0 && <Text style={styles.vazioDica}>Atendimentos realizados e ainda não pagos aparecem aqui.</Text>}
           </View>
         }
         renderItem={({ item: g }) => (
@@ -186,6 +236,16 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   header: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, paddingBottom: theme.spacing.xs },
   headerTitulo: { color: theme.colors.text, fontSize: 28, fontFamily: theme.font.bold },
+  filtroLinha: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: theme.spacing.md, marginTop: theme.spacing.sm },
+  categoriaBotao: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderColor: theme.colors.border, borderRadius: theme.radius.full, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: theme.colors.surface },
+  categoriaBotaoAtivo: { borderColor: theme.colors.primary },
+  categoriaLabel: { color: theme.colors.text, fontFamily: theme.font.medium, fontSize: 13 },
+  opcoesBox: { marginHorizontal: theme.spacing.md, marginTop: theme.spacing.sm, padding: 10, borderRadius: theme.radius.md, backgroundColor: theme.colors.surfaceVariant },
+  chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  opcaoChip: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: theme.radius.full, backgroundColor: theme.colors.surface, borderWidth: 1.5, borderColor: theme.colors.border },
+  opcaoChipAtivo: { backgroundColor: theme.colors.primaryLight, borderColor: theme.colors.primaryLight },
+  opcaoChipTexto: { color: theme.colors.textSecondary, fontSize: 12, fontFamily: theme.font.medium },
+  opcaoChipTextoAtivo: { color: theme.colors.primary },
   resumoCard: { marginHorizontal: theme.spacing.md, marginTop: theme.spacing.sm, padding: theme.spacing.md, borderRadius: theme.radius.lg, backgroundColor: PASTEL.vermelho },
   resumoLabel: { color: PASTEL.vermelhoTexto, fontSize: 12, fontFamily: theme.font.medium },
   resumoValor: { color: theme.colors.text, fontSize: 26, fontFamily: theme.font.bold, marginTop: 2 },
