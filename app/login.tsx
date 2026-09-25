@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import {
-  StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image,
+  StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/auth-context';
 import { theme } from '@/src/theme';
 import { alertar } from '@/src/utils/alerta';
+import { AtomusOrbitas } from '@/components/atomus-orbitas';
 
 export default function LoginScreen() {
   const { signIn, signUp, enviarRecuperacaoSenha } = useAuth();
@@ -68,8 +69,8 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.conteudo}>
-          <View style={styles.logoCircle}>
-            <Image source={require('@/assets/images/icon.png')} style={styles.logoImagem} resizeMode="contain" />
+          <View style={styles.logoAnimado}>
+            <AtomusOrbitas size={96} traco={6} />
           </View>
           <Text style={styles.titulo}>Atomus</Text>
           <Text style={styles.subtitulo}>
@@ -158,20 +159,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   conteudo: { flex: 1, justifyContent: 'center', paddingHorizontal: theme.spacing.xl },
-  logoCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: theme.colors.divider,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: theme.spacing.md,
-    overflow: 'hidden',
-  },
-  logoImagem: { width: 44, height: 44 },
+  logoAnimado: { alignSelf: 'center', marginBottom: theme.spacing.sm },
   titulo: { color: theme.colors.text, fontSize: 24, fontFamily: theme.font.bold, textAlign: 'center' },
   subtitulo: {
     color: theme.colors.textSecondary,

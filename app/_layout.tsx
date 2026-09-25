@@ -8,7 +8,8 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { theme } from '@/src/theme';
@@ -43,17 +44,27 @@ function NavegacaoRaiz() {
 
   const pronto = fontsLoaded && !carregando;
 
+  // A animação de abertura fica pelo menos 1 s na tela, mesmo com o app já carregado; depois faz o zoom e entra no app.
+  const [minimoAtingido, setMinimoAtingido] = useState(false);
+  const [aberturaTerminou, setAberturaTerminou] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setMinimoAtingido(true), 1000);
+    return () => clearTimeout(id);
+  }, []);
+  const terminarAbertura = useCallback(() => setAberturaTerminou(true), []);
+
   useEffect(() => {
     if (pronto) {
       SplashScreen.hideAsync();
     }
   }, [pronto]);
 
-  if (!pronto) {
-    return <LoadingScreen />;
-  }
+  const liberado = pronto && minimoAtingido;
 
+  // Estrutura fixa (o app só monta quando está pronto, mas a LoadingScreen nunca é recriada — a animação segue sem reiniciar).
   return (
+    <View style={{ flex: 1 }}>
+    {pronto && (
     <ThemeProvider value={navigationTheme}>
       <Stack>
         <Stack.Protected guard={!session && !modoRecuperacaoSenha}>
@@ -74,6 +85,9 @@ function NavegacaoRaiz() {
       </Stack>
       <StatusBar style="dark" />
     </ThemeProvider>
+    )}
+    {!aberturaTerminou && <LoadingScreen saindo={liberado} aoTerminar={terminarAbertura} />}
+    </View>
   );
 }
 
